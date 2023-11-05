@@ -22,9 +22,10 @@ pub fn strip_oidc_from_path(base_url: Uri, uri: &Uri) -> Result<Uri, MiddlewareE
                         .map(|x| x.to_string())
                         .reduce(|acc, x| acc + "&" + &x)
                 })
+                .map(|x| "?" + x)
                 .unwrap_or_default();
 
-            PathAndQuery::from_maybe_shared(format!("{}?{}", path_and_query.path(), query))
+            PathAndQuery::from_maybe_shared(format!("{}{}", path_and_query.path(), query))
         })
         .transpose()?;
 
