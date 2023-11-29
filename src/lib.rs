@@ -1,5 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+use std::str::FromStr;
+
 use crate::error::Error;
 use http::Uri;
 use openidconnect::{
@@ -11,14 +13,13 @@ use openidconnect::{
     },
     reqwest::async_http_client,
     ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields, IdTokenFields, IssuerUrl, Nonce,
-    PkceCodeVerifier, StandardErrorResponse, StandardTokenResponse,
+    PkceCodeVerifier, RefreshToken, StandardErrorResponse, StandardTokenResponse,
 };
 use serde::{Deserialize, Serialize};
 
 pub mod error;
 mod extractor;
 mod middleware;
-mod util;
 
 pub use extractor::{OidcAccessToken, OidcClaims};
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
@@ -89,7 +90,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
         let client = Client::from_provider_metadata(
             provider_metadata,
             ClientId::new(client_id),
-            client_secret.map(|x| ClientSecret::new(x)),
+            client_secret.map(ClientSecret::new),
         );
         Ok(Self {
             scopes,
@@ -122,4 +123,18 @@ struct OidcSession {
     pkce_verifier: PkceCodeVerifier,
     id_token: Option<String>,
     access_token: Option<String>,
+    refresh_token: Option<String>,
+}
+
+impl OidcSession {
+    pub(crate) fn id_token<AC: AdditionalClaims>(&self) -> Option<IdToken<AC>> {
+        self.id_token
+            .as_ref()
+            .map(|x| IdToken::<AC>::from_str(x).unwrap())
+    }
+    pub(crate) fn refresh_token(&self) -> Option<RefreshToken> {
+        self.refresh_token
+            .as_ref()
+            .map(|x| RefreshToken::new(x.to_string()))
+    }
 }
