@@ -1,7 +1,7 @@
 [package]
 name = "axum-oidc"
-description = "A OpenID Connect Client Libary for axum"
-version = "0.1.0"
+description = "A wrapper for the openidconnect crate for axum"
+version = "0.1.1"
 edition = "2021"
 authors = [ "Paul Z <info@pfz4.de>" ]
 readme = "README.md"
