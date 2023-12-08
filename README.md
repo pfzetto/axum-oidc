@@ -52,10 +52,8 @@ async fn main() {
         .layer(oidc_auth_service)
         .layer(session_service);
 
-    axum::Server::bind(&"[::]:8080".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    let listener = TcpListener::bind("[::]:8080").await.unwrap();
+    axum::serve(listener, app.into_make_service()).await.unwrap();
 }
 ```
 
