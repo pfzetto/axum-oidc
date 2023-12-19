@@ -419,6 +419,7 @@ pub fn strip_oidc_from_path(base_url: Uri, uri: &Uri) -> Result<Uri, MiddlewareE
                             !x.starts_with("code")
                                 && !x.starts_with("state")
                                 && !x.starts_with("session_state")
+                                && !x.starts_with("iss")
                         })
                         .map(|x| x.to_string())
                         .reduce(|acc, x| acc + "&" + &x)
