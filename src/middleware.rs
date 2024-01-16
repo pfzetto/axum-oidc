@@ -1,6 +1,5 @@
 use std::{
     marker::PhantomData,
-    str::FromStr,
     task::{Context, Poll},
 };
 
@@ -16,20 +15,15 @@ use tower_service::Service;
 use tower_sessions::Session;
 
 use openidconnect::{
-    core::{
-        CoreAuthenticationFlow, CoreGenderClaim, CoreIdTokenFields, CoreJsonWebKeyType,
-        CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
-    },
-    reqwest::async_http_client,
-    AccessTokenHash, AuthorizationCode, CsrfToken, ExtraTokenFields, IdTokenFields, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope,
-    StandardTokenResponse, TokenResponse, TokenType,
+    core::CoreAuthenticationFlow, reqwest::async_http_client, AccessTokenHash, AuthorizationCode,
+    CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
+    TokenResponse,
 };
 
 use crate::{
     error::{Error, MiddlewareError},
     extractor::{OidcAccessToken, OidcClaims},
-    AdditionalClaims, BoxError, IdToken, OidcClient, OidcQuery, OidcSession, SESSION_KEY,
+    AdditionalClaims, BoxError, OidcClient, OidcQuery, OidcSession, SESSION_KEY,
 };
 
 /// Layer for the [OidcLoginMiddleware].
@@ -124,8 +118,10 @@ where
                     .extensions
                     .get::<Session>()
                     .ok_or(MiddlewareError::SessionNotFound)?;
-                let login_session: Option<OidcSession> =
-                    session.get(SESSION_KEY).map_err(MiddlewareError::from)?;
+                let login_session: Option<OidcSession> = session
+                    .get(SESSION_KEY)
+                    .await
+                    .map_err(MiddlewareError::from)?;
 
                 let handler_uri =
                     strip_oidc_from_path(oidcclient.application_base_url.clone(), &parts.uri)?;
@@ -178,7 +174,7 @@ where
                         .refresh_token()
                         .map(|x| x.secret().to_string());
 
-                    session.insert(SESSION_KEY, login_session).unwrap();
+                    session.insert(SESSION_KEY, login_session).await.unwrap();
 
                     Ok(Redirect::temporary(&handler_uri.to_string()).into_response())
                 } else {
@@ -208,7 +204,7 @@ where
                         refresh_token: None,
                     };
 
-                    session.insert(SESSION_KEY, oidc_session).unwrap();
+                    session.insert(SESSION_KEY, oidc_session).await.unwrap();
 
                     Ok(Redirect::temporary(auth_url.as_str()).into_response())
                 }
@@ -308,8 +304,10 @@ where
                 .extensions
                 .get::<Session>()
                 .ok_or(MiddlewareError::SessionNotFound)?;
-            let mut login_session: Option<OidcSession> =
-                session.get(SESSION_KEY).map_err(MiddlewareError::from)?;
+            let mut login_session: Option<OidcSession> = session
+                .get(SESSION_KEY)
+                .await
+                .map_err(MiddlewareError::from)?;
 
             let handler_uri =
                 strip_oidc_from_path(oidcclient.application_base_url.clone(), &parts.uri)?;
@@ -384,7 +382,7 @@ where
                             .get::<Session>()
                             .ok_or(MiddlewareError::SessionNotFound)?;
 
-                        session.insert(SESSION_KEY, login_session).unwrap();
+                        session.insert(SESSION_KEY, login_session).await.unwrap();
                     }
                     (None, None) => {}
                 }
