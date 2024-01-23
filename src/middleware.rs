@@ -15,9 +15,12 @@ use tower_service::Service;
 use tower_sessions::Session;
 
 use openidconnect::{
-    core::CoreAuthenticationFlow, reqwest::async_http_client, AccessTokenHash, AuthorizationCode,
-    CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
-    TokenResponse,
+    core::{CoreAuthenticationFlow, CoreErrorResponseType},
+    reqwest::async_http_client,
+    AccessTokenHash, AuthorizationCode, CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
+    PkceCodeVerifier, RedirectUrl,
+    RequestTokenError::ServerResponse,
+    Scope, TokenResponse,
 };
 
 use crate::{
@@ -343,39 +346,53 @@ where
                                 refresh_request.add_scope(Scope::new(scope.to_string()));
                         }
 
-                        let token_response =
-                            refresh_request.request_async(async_http_client).await?;
+                        match refresh_request.request_async(async_http_client).await {
+                            Ok(token_response) => {
+                                // Extract the ID token claims after verifying its authenticity and nonce.
+                                let id_token = token_response
+                                    .id_token()
+                                    .ok_or(MiddlewareError::IdTokenMissing)?;
+                                let claims = id_token.claims(
+                                    &oidcclient.client.id_token_verifier(),
+                                    &login_session.nonce,
+                                )?;
 
-                        // Extract the ID token claims after verifying its authenticity and nonce.
-                        let id_token = token_response
-                            .id_token()
-                            .ok_or(MiddlewareError::IdTokenMissing)?;
-                        let claims = id_token
-                            .claims(&oidcclient.client.id_token_verifier(), &login_session.nonce)?;
+                                // Verify the access token hash to ensure that the access token hasn't been substituted for
+                                // another user's.
+                                if let Some(expected_access_token_hash) = claims.access_token_hash()
+                                {
+                                    let actual_access_token_hash = AccessTokenHash::from_token(
+                                        token_response.access_token(),
+                                        &id_token.signing_alg()?,
+                                    )?;
+                                    if actual_access_token_hash != *expected_access_token_hash {
+                                        return Err(MiddlewareError::AccessTokenHashInvalid);
+                                    }
+                                }
 
-                        // Verify the access token hash to ensure that the access token hasn't been substituted for
-                        // another user's.
-                        if let Some(expected_access_token_hash) = claims.access_token_hash() {
-                            let actual_access_token_hash = AccessTokenHash::from_token(
-                                token_response.access_token(),
-                                &id_token.signing_alg()?,
-                            )?;
-                            if actual_access_token_hash != *expected_access_token_hash {
-                                return Err(MiddlewareError::AccessTokenHashInvalid);
+                                login_session.id_token = Some(id_token.to_string());
+                                login_session.access_token =
+                                    Some(token_response.access_token().secret().to_string());
+                                login_session.refresh_token = token_response
+                                    .refresh_token()
+                                    .map(|x| x.secret().to_string());
+
+                                parts.extensions.insert(OidcClaims(claims.clone()));
+                                parts.extensions.insert(OidcAccessToken(
+                                    login_session.access_token.clone().unwrap_or_default(),
+                                ));
                             }
-                        }
-
-                        login_session.id_token = Some(id_token.to_string());
-                        login_session.access_token =
-                            Some(token_response.access_token().secret().to_string());
-                        login_session.refresh_token = token_response
-                            .refresh_token()
-                            .map(|x| x.secret().to_string());
-
-                        parts.extensions.insert(OidcClaims(claims.clone()));
-                        parts.extensions.insert(OidcAccessToken(
-                            login_session.access_token.clone().unwrap_or_default(),
-                        ));
+                            Err(ServerResponse(e))
+                                if *e.error() == CoreErrorResponseType::InvalidGrant =>
+                            {
+                                // Refresh failed, refresh_token most likely expired or
+                                // invalid, the session can be considered lost
+                                login_session.refresh_token = None;
+                            }
+                            Err(err) => {
+                                return Err(err.into());
+                            }
+                        };
 
                         let session = parts
                             .extensions
