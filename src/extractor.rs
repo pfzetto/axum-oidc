@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::{error::ExtractorError, AdditionalClaims};
 use async_trait::async_trait;
 use axum_core::extract::FromRequestParts;
@@ -27,6 +29,23 @@ where
     }
 }
 
+impl<AC: AdditionalClaims> Deref for OidcClaims<AC> {
+    type Target = IdTokenClaims<AC, CoreGenderClaim>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<AC> AsRef<IdTokenClaims<AC, CoreGenderClaim>> for OidcClaims<AC>
+where
+    AC: AdditionalClaims,
+{
+    fn as_ref(&self) -> &IdTokenClaims<AC, CoreGenderClaim> {
+        &self.0
+    }
+}
+
 /// Extractor for the OpenID Connect Access Token.
 ///
 /// This Extractor will only return the Access Token when the cached session is valid and [crate::middleware::OidcAuthMiddleware] is loaded.
@@ -46,5 +65,19 @@ where
             .get::<Self>()
             .cloned()
             .ok_or(ExtractorError::Unauthorized)
+    }
+}
+
+impl Deref for OidcAccessToken {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<str> for OidcAccessToken {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
     }
 }

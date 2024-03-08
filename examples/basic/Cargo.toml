@@ -1,0 +1,13 @@
+[package]
+name = "basic"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.36.0", features = ["net", "macros"] }
+axum = "0.7.4"
+axum-oidc = { path = "./../.." }
+tower = "0.4.13"
+tower-sessions = "0.11.0"

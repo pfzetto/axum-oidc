@@ -15,51 +15,8 @@ The `OidcAccessToken`-extractor can be used to get the OpenId Connect Access Tok
 
 Your OIDC-Client must be allowed to redirect to **every** subpath of your application base url.
 
-```rust
-#[tokio::main]
-async fn main() {
-
-    let session_store = MemoryStore::default();
-    let session_service = ServiceBuilder::new()
-        .layer(HandleErrorLayer::new(|_: BoxError| async {
-            StatusCode::BAD_REQUEST
-        }))
-        .layer(SessionManagerLayer::new(session_store).with_same_site(SameSite::Lax));
-
-    let oidc_login_service = ServiceBuilder::new()
-        .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
-            e.into_response()
-        }))
-        .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new());
-
-    let oidc_auth_service = ServiceBuilder::new()
-        .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
-            e.into_response()
-        }))
-        .layer(
-            OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-                Uri::from_static("https://example.com"),
-                "<issuer>".to_string(),
-                "<client_id>".to_string(),
-                "<client_secret>".to_owned(),
-                vec![],
-            ).await.unwrap(),
-        );
-
-    let app = Router::new()
-        .route("/", get(|| async { "Hello, authenticated World!" }))
-        .layer(oidc_login_service)
-        .layer(oidc_auth_service)
-        .layer(session_service);
-
-    let listener = TcpListener::bind("[::]:8080").await.unwrap();
-    axum::serve(listener, app.into_make_service()).await.unwrap();
-}
-```
-
-# Example Projects
-Here is a place for projects that are using this library.
-- [zettoIT ARS - AudienceResponseSystem](https://git2.zettoit.eu/zettoit/ars) (by me)
+# Examples
+Take a look at the `examples` folder for examples.
 
 # Contributing
 I'm happy about any contribution in any form.
