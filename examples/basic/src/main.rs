@@ -31,10 +31,10 @@ async fn main() {
         }))
         .layer(
             OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-                Uri::from_static("http://localhost:8080"),
-                "https://auth.zettoit.eu/realms/zettoit".to_string(),
-                "oxicloud".to_string(),
-                Some("IvBcDOfp9WBfGNmwIbiv67bxCwuQUGbl".to_owned()),
+                Uri::from_static("https://app.example.com"),
+                "https://auth.example.com/auth/realms/example".to_string(),
+                "my-client".to_string(),
+                Some("123456".to_owned()),
                 vec![],
             )
             .await
