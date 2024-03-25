@@ -25,7 +25,7 @@ use openidconnect::{
 
 use crate::{
     error::{Error, MiddlewareError},
-    extractor::{OidcAccessToken, OidcClaims},
+    extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout},
     AdditionalClaims, BoxError, OidcClient, OidcQuery, OidcSession, SESSION_KEY,
 };
 
@@ -334,6 +334,16 @@ where
                         parts.extensions.insert(OidcAccessToken(
                             login_session.access_token.clone().unwrap_or_default(),
                         ));
+                        if let Some(end_session_endpoint) = oidcclient.end_session_endpoint.clone()
+                        {
+                            parts.extensions.insert(OidcRpInitiatedLogout {
+                                end_session_endpoint,
+                                id_token_hint: login_session.id_token.clone().unwrap(),
+                                client_id: oidcclient.client_id.clone(),
+                                post_logout_redirect_uri: None,
+                                state: None,
+                            });
+                        }
                     }
                     // stored id token is invalid and can't be uses, but we have a refresh token
                     // and can use it and try to get another id token.

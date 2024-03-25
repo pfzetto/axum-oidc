@@ -3,6 +3,7 @@ use axum::{
 };
 use axum_oidc::{
     error::MiddlewareError, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcLoginLayer,
+    OidcRpInitiatedLogout,
 };
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -13,6 +14,12 @@ use tower_sessions::{
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
+    let app_url = std::env::var("APP_URL").expect("APP_URL env variable");
+    let issuer = std::env::var("ISSUER").expect("ISSUER env variable");
+    let client_id = std::env::var("CLIENT_ID").expect("CLIENT_ID env variable");
+    let client_secret = std::env::var("CLIENT_SECRET").ok();
+
     let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(false)
@@ -31,10 +38,10 @@ async fn main() {
         }))
         .layer(
             OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-                Uri::from_static("https://app.example.com"),
-                "https://auth.example.com/auth/realms/example".to_string(),
-                "my-client".to_string(),
-                Some("123456".to_owned()),
+                Uri::from_maybe_shared(app_url).expect("valid APP_URL"),
+                issuer,
+                client_id,
+                client_secret,
                 vec![],
             )
             .await
@@ -43,6 +50,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/foo", get(authenticated))
+        .route("/logout", get(logout))
         .layer(oidc_login_service)
         .route("/bar", get(maybe_authenticated))
         .layer(oidc_auth_service)
@@ -69,4 +77,8 @@ async fn maybe_authenticated(
     } else {
         "Hello anon!".to_string()
     }
+}
+
+async fn logout(logout: OidcRpInitiatedLogout) -> impl IntoResponse {
+    logout.with_post_logout_redirect(Uri::from_static("https://google.de"))
 }

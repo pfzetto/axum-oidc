@@ -10,6 +10,9 @@ use thiserror::Error;
 pub enum ExtractorError {
     #[error("unauthorized")]
     Unauthorized,
+
+    #[error("rp initiated logout information not found")]
+    RpInitiatedLogoutInformationNotFound,
 }
 
 #[derive(Debug, Error)]
@@ -65,6 +68,9 @@ pub enum Error {
     #[error("url parsing: {0:?}")]
     UrlParsing(#[from] openidconnect::url::ParseError),
 
+    #[error("invalid end_session_endpoint uri: {0:?}")]
+    InvalidEndSessionEndpoint(http::uri::InvalidUri),
+
     #[error("discovery: {0:?}")]
     Discovery(#[from] openidconnect::DiscoveryError<openidconnect::reqwest::Error<reqwest::Error>>),
 
@@ -77,7 +83,12 @@ pub enum Error {
 
 impl IntoResponse for ExtractorError {
     fn into_response(self) -> axum_core::response::Response {
-        (StatusCode::UNAUTHORIZED, "unauthorized").into_response()
+        match self {
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
+            Self::RpInitiatedLogoutInformationNotFound => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "intenal server error").into_response()
+            }
+        }
     }
 }
 
