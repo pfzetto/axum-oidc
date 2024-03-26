@@ -1,6 +1,7 @@
+#![deny(unsafe_code)]
+#![deny(clippy::unwrap_used)]
+#![deny(warnings)]
 #![doc = include_str!("../README.md")]
-
-use std::str::FromStr;
 
 use crate::error::Error;
 use http::Uri;
@@ -9,15 +10,15 @@ use openidconnect::{
         CoreAuthDisplay, CoreAuthPrompt, CoreClaimName, CoreClaimType, CoreClientAuthMethod,
         CoreErrorResponseType, CoreGenderClaim, CoreGrantType, CoreJsonWebKey, CoreJsonWebKeyType,
         CoreJsonWebKeyUse, CoreJweContentEncryptionAlgorithm, CoreJweKeyManagementAlgorithm,
-        CoreJwsSigningAlgorithm, CoreProviderMetadata, CoreResponseMode, CoreResponseType,
-        CoreRevocableToken, CoreRevocationErrorResponse, CoreSubjectIdentifierType,
-        CoreTokenIntrospectionResponse, CoreTokenType,
+        CoreJwsSigningAlgorithm, CoreResponseMode, CoreResponseType, CoreRevocableToken,
+        CoreRevocationErrorResponse, CoreSubjectIdentifierType, CoreTokenIntrospectionResponse,
+        CoreTokenType,
     },
     reqwest::async_http_client,
-    ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields, IdTokenFields, IssuerUrl, Nonce,
-    PkceCodeVerifier, RefreshToken, StandardErrorResponse, StandardTokenResponse,
+    AccessToken, ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields, IdTokenFields,
+    IssuerUrl, Nonce, PkceCodeVerifier, RefreshToken, StandardErrorResponse, StandardTokenResponse,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub mod error;
 mod extractor;
@@ -28,7 +29,10 @@ pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLogi
 
 const SESSION_KEY: &str = "axum-oidc";
 
-pub trait AdditionalClaims: openidconnect::AdditionalClaims + Clone + Sync + Send {}
+pub trait AdditionalClaims:
+    openidconnect::AdditionalClaims + Clone + Sync + Send + Serialize + DeserializeOwned
+{
+}
 
 type OidcTokenResponse<AC> = StandardTokenResponse<
     IdTokenFields<
@@ -147,28 +151,24 @@ struct OidcQuery {
 
 /// oidc session
 #[derive(Serialize, Deserialize, Debug)]
-struct OidcSession {
+#[serde(bound = "AC: Serialize + DeserializeOwned")]
+struct OidcSession<AC: AdditionalClaims> {
     nonce: Nonce,
     csrf_token: CsrfToken,
     pkce_verifier: PkceCodeVerifier,
-    id_token: Option<String>,
-    access_token: Option<String>,
-    refresh_token: Option<String>,
+    authenticated: Option<AuthenticatedSession<AC>>,
 }
 
-impl OidcSession {
-    pub(crate) fn id_token<AC: AdditionalClaims>(&self) -> Option<IdToken<AC>> {
-        self.id_token
-            .as_ref()
-            .map(|x| IdToken::<AC>::from_str(x).unwrap())
-    }
-    pub(crate) fn refresh_token(&self) -> Option<RefreshToken> {
-        self.refresh_token
-            .as_ref()
-            .map(|x| RefreshToken::new(x.to_string()))
-    }
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(bound = "AC: Serialize + DeserializeOwned")]
+struct AuthenticatedSession<AC: AdditionalClaims> {
+    id_token: IdToken<AC>,
+    access_token: AccessToken,
+    refresh_token: Option<RefreshToken>,
 }
 
+/// additional metadata that is discovered on client creation via the
+/// `.well-knwon/openid-configuration` endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AdditionalProviderMetadata {
     end_session_endpoint: Option<String>,

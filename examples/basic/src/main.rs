@@ -1,5 +1,9 @@
 use axum::{
-    error_handling::HandleErrorLayer, http::Uri, response::IntoResponse, routing::get, Router,
+    error_handling::HandleErrorLayer,
+    http::Uri,
+    response::{IntoResponse, Redirect},
+    routing::get,
+    Router,
 };
 use axum_oidc::{
     error::MiddlewareError, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcLoginLayer,
@@ -80,5 +84,9 @@ async fn maybe_authenticated(
 }
 
 async fn logout(logout: OidcRpInitiatedLogout) -> impl IntoResponse {
-    logout.with_post_logout_redirect(Uri::from_static("https://google.de"))
+    let logout_uri = logout
+        .with_post_logout_redirect(Uri::from_static("https://pfzetto.de"))
+        .uri()
+        .unwrap();
+    Redirect::temporary(&logout_uri.to_string())
 }
