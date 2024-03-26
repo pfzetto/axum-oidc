@@ -13,6 +13,8 @@ The extractors will always return a value.
 The `OidcClaims`-extractor can be used to get the OpenId Conenct Claims.
 The `OidcAccessToken`-extractor can be used to get the OpenId Connect Access Token.
 
+The `OidcRpInitializedLogout`-extractor can be used to get the rp initialized logout uri.
+
 Your OIDC-Client must be allowed to redirect to **every** subpath of your application base url.
 
 # Examples

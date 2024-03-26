@@ -9,24 +9,25 @@ use axum::{
 };
 use axum_core::{extract::FromRequestParts, response::Response};
 use futures_util::future::BoxFuture;
-use http::{uri::PathAndQuery, Request, Uri};
+use http::{request::Parts, uri::PathAndQuery, Request, Uri};
 use tower_layer::Layer;
 use tower_service::Service;
 use tower_sessions::Session;
 
 use openidconnect::{
-    core::{CoreAuthenticationFlow, CoreErrorResponseType},
+    core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim},
     reqwest::async_http_client,
-    AccessTokenHash, AuthorizationCode, CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
-    PkceCodeVerifier, RedirectUrl,
+    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, IdTokenClaims, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse,
 };
 
 use crate::{
     error::{Error, MiddlewareError},
-    extractor::{OidcAccessToken, OidcClaims},
-    AdditionalClaims, BoxError, OidcClient, OidcQuery, OidcSession, SESSION_KEY,
+    extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout},
+    AdditionalClaims, AuthenticatedSession, BoxError, IdToken, OidcClient, OidcQuery, OidcSession,
+    SESSION_KEY,
 };
 
 /// Layer for the [OidcLoginMiddleware].
@@ -121,7 +122,7 @@ where
                     .extensions
                     .get::<Session>()
                     .ok_or(MiddlewareError::SessionNotFound)?;
-                let login_session: Option<OidcSession> = session
+                let login_session: Option<OidcSession<AC>> = session
                     .get(SESSION_KEY)
                     .await
                     .map_err(MiddlewareError::from)?;
@@ -158,26 +159,15 @@ where
                     let claims = id_token
                         .claims(&oidcclient.client.id_token_verifier(), &login_session.nonce)?;
 
-                    // Verify the access token hash to ensure that the access token hasn't been substituted for
-                    // another user's.
-                    if let Some(expected_access_token_hash) = claims.access_token_hash() {
-                        let actual_access_token_hash = AccessTokenHash::from_token(
-                            token_response.access_token(),
-                            &id_token.signing_alg()?,
-                        )?;
-                        if actual_access_token_hash != *expected_access_token_hash {
-                            return Err(MiddlewareError::AccessTokenHashInvalid);
-                        }
-                    }
+                    validate_access_token_hash(id_token, token_response.access_token(), claims)?;
 
-                    login_session.id_token = Some(id_token.to_string());
-                    login_session.access_token =
-                        Some(token_response.access_token().secret().to_string());
-                    login_session.refresh_token = token_response
-                        .refresh_token()
-                        .map(|x| x.secret().to_string());
+                    login_session.authenticated = Some(AuthenticatedSession {
+                        id_token: id_token.clone(),
+                        access_token: token_response.access_token().clone(),
+                        refresh_token: token_response.refresh_token().cloned(),
+                    });
 
-                    session.insert(SESSION_KEY, login_session).await.unwrap();
+                    session.insert(SESSION_KEY, login_session).await?;
 
                     Ok(Redirect::temporary(&handler_uri.to_string()).into_response())
                 } else {
@@ -198,16 +188,14 @@ where
                         auth.set_pkce_challenge(pkce_challenge).url()
                     };
 
-                    let oidc_session = OidcSession {
+                    let oidc_session = OidcSession::<AC> {
                         nonce,
                         csrf_token,
                         pkce_verifier,
-                        id_token: None,
-                        access_token: None,
-                        refresh_token: None,
+                        authenticated: None,
                     };
 
-                    session.insert(SESSION_KEY, oidc_session).await.unwrap();
+                    session.insert(SESSION_KEY, oidc_session).await?;
 
                     Ok(Redirect::temporary(auth_url.as_str()).into_response())
                 }
@@ -307,7 +295,7 @@ where
                 .extensions
                 .get::<Session>()
                 .ok_or(MiddlewareError::SessionNotFound)?;
-            let mut login_session: Option<OidcSession> = session
+            let mut login_session: Option<OidcSession<AC>> = session
                 .get(SESSION_KEY)
                 .await
                 .map_err(MiddlewareError::from)?;
@@ -320,88 +308,37 @@ where
                 .set_redirect_uri(RedirectUrl::new(handler_uri.to_string())?);
 
             if let Some(login_session) = &mut login_session {
-                let id_token_claims = login_session.id_token::<AC>().and_then(|id_token| {
-                    id_token
+                let id_token_claims = login_session.authenticated.as_ref().and_then(|session| {
+                    session
+                        .id_token
                         .claims(&oidcclient.client.id_token_verifier(), &login_session.nonce)
                         .ok()
                         .cloned()
+                        .map(|claims| (session, claims))
                 });
 
-                match (id_token_claims, login_session.refresh_token()) {
+                if let Some((session, claims)) = id_token_claims {
                     // stored id token is valid and can be used
-                    (Some(claims), _) => {
-                        parts.extensions.insert(OidcClaims(claims));
-                        parts.extensions.insert(OidcAccessToken(
-                            login_session.access_token.clone().unwrap_or_default(),
-                        ));
-                    }
-                    // stored id token is invalid and can't be uses, but we have a refresh token
-                    // and can use it and try to get another id token.
-                    (_, Some(refresh_token)) => {
-                        let mut refresh_request =
-                            oidcclient.client.exchange_refresh_token(&refresh_token);
+                    insert_extensions(&mut parts, claims.clone(), &oidcclient, session);
+                } else if let Some(refresh_token) = login_session
+                    .authenticated
+                    .as_ref()
+                    .and_then(|x| x.refresh_token.as_ref())
+                {
+                    if let Some((claims, authenticated_session)) =
+                        try_refresh_token(&oidcclient, refresh_token, &login_session.nonce).await?
+                    {
+                        insert_extensions(&mut parts, claims, &oidcclient, &authenticated_session);
+                        login_session.authenticated = Some(authenticated_session);
+                    };
 
-                        for scope in oidcclient.scopes.iter() {
-                            refresh_request =
-                                refresh_request.add_scope(Scope::new(scope.to_string()));
-                        }
+                    // save refreshed session or delete it when the token couldn't be refreshed
+                    let session = parts
+                        .extensions
+                        .get::<Session>()
+                        .ok_or(MiddlewareError::SessionNotFound)?;
 
-                        match refresh_request.request_async(async_http_client).await {
-                            Ok(token_response) => {
-                                // Extract the ID token claims after verifying its authenticity and nonce.
-                                let id_token = token_response
-                                    .id_token()
-                                    .ok_or(MiddlewareError::IdTokenMissing)?;
-                                let claims = id_token.claims(
-                                    &oidcclient.client.id_token_verifier(),
-                                    &login_session.nonce,
-                                )?;
-
-                                // Verify the access token hash to ensure that the access token hasn't been substituted for
-                                // another user's.
-                                if let Some(expected_access_token_hash) = claims.access_token_hash()
-                                {
-                                    let actual_access_token_hash = AccessTokenHash::from_token(
-                                        token_response.access_token(),
-                                        &id_token.signing_alg()?,
-                                    )?;
-                                    if actual_access_token_hash != *expected_access_token_hash {
-                                        return Err(MiddlewareError::AccessTokenHashInvalid);
-                                    }
-                                }
-
-                                login_session.id_token = Some(id_token.to_string());
-                                login_session.access_token =
-                                    Some(token_response.access_token().secret().to_string());
-                                login_session.refresh_token = token_response
-                                    .refresh_token()
-                                    .map(|x| x.secret().to_string());
-
-                                parts.extensions.insert(OidcClaims(claims.clone()));
-                                parts.extensions.insert(OidcAccessToken(
-                                    login_session.access_token.clone().unwrap_or_default(),
-                                ));
-                            }
-                            Err(ServerResponse(e))
-                                if *e.error() == CoreErrorResponseType::InvalidGrant =>
-                            {
-                                // Refresh failed, refresh_token most likely expired or
-                                // invalid, the session can be considered lost
-                                login_session.refresh_token = None;
-                            }
-                            Err(err) => {
-                                return Err(err.into());
-                            }
-                        };
-
-                        let session = parts
-                            .extensions
-                            .get::<Session>()
-                            .ok_or(MiddlewareError::SessionNotFound)?;
-
-                        session.insert(SESSION_KEY, login_session).await.unwrap();
-                    }
-                    (None, None) => {}
+                    session.insert(SESSION_KEY, login_session).await?;
                 }
             }
 
@@ -447,4 +384,86 @@ pub fn strip_oidc_from_path(base_url: Uri, uri: &Uri) -> Result<Uri, MiddlewareE
         .transpose()?;
 
     Ok(Uri::from_parts(base_url)?)
+}
+
+/// insert all extensions that are used by the extractors
+fn insert_extensions<AC: AdditionalClaims>(
+    parts: &mut Parts,
+    claims: IdTokenClaims<AC, CoreGenderClaim>,
+    client: &OidcClient<AC>,
+    authenticated_session: &AuthenticatedSession<AC>,
+) {
+    parts.extensions.insert(OidcClaims(claims));
+    parts.extensions.insert(OidcAccessToken(
+        authenticated_session.access_token.secret().to_string(),
+    ));
+    if let Some(end_session_endpoint) = &client.end_session_endpoint {
+        parts.extensions.insert(OidcRpInitiatedLogout {
+            end_session_endpoint: end_session_endpoint.clone(),
+            id_token_hint: authenticated_session.id_token.to_string(),
+            client_id: client.client_id.clone(),
+            post_logout_redirect_uri: None,
+            state: None,
+        });
+    }
+}
+
+/// Verify the access token hash to ensure that the access token hasn't been substituted for
+/// another user's.
+/// Returns `Ok` when access token is valid
+fn validate_access_token_hash<AC: AdditionalClaims>(
+    id_token: &IdToken<AC>,
+    access_token: &AccessToken,
+    claims: &IdTokenClaims<AC, CoreGenderClaim>,
+) -> Result<(), MiddlewareError> {
+    if let Some(expected_access_token_hash) = claims.access_token_hash() {
+        let actual_access_token_hash =
+            AccessTokenHash::from_token(access_token, &id_token.signing_alg()?)?;
+        if actual_access_token_hash == *expected_access_token_hash {
+            Ok(())
+        } else {
+            Err(MiddlewareError::AccessTokenHashInvalid)
+        }
+    } else {
+        Ok(())
+    }
+}
+
+async fn try_refresh_token<AC: AdditionalClaims>(
+    client: &OidcClient<AC>,
+    refresh_token: &RefreshToken,
+    nonce: &Nonce,
+) -> Result<Option<(IdTokenClaims<AC, CoreGenderClaim>, AuthenticatedSession<AC>)>, MiddlewareError>
+{
+    let mut refresh_request = client.client.exchange_refresh_token(refresh_token);
+
+    for scope in client.scopes.iter() {
+        refresh_request = refresh_request.add_scope(Scope::new(scope.to_string()));
+    }
+
+    match refresh_request.request_async(async_http_client).await {
+        Ok(token_response) => {
+            // Extract the ID token claims after verifying its authenticity and nonce.
+            let id_token = token_response
+                .id_token()
+                .ok_or(MiddlewareError::IdTokenMissing)?;
+            let claims = id_token.claims(&client.client.id_token_verifier(), nonce)?;
+
+            validate_access_token_hash(id_token, token_response.access_token(), claims)?;
+
+            let authenticated_session = AuthenticatedSession {
+                id_token: id_token.clone(),
+                access_token: token_response.access_token().clone(),
+                refresh_token: token_response.refresh_token().cloned(),
+            };
+
+            Ok(Some((claims.clone(), authenticated_session)))
+        }
+        Err(ServerResponse(e)) if *e.error() == CoreErrorResponseType::InvalidGrant => {
+            // Refresh failed, refresh_token most likely expired or
+            // invalid, the session can be considered lost
+            Ok(None)
+        }
+        Err(err) => Err(err.into()),
+    }
 }
