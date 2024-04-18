@@ -1,6 +1,5 @@
 use std::{
     marker::PhantomData,
-    str::FromStr,
     task::{Context, Poll},
 };
 
@@ -16,20 +15,15 @@ use tower_service::Service;
 use tower_sessions::Session;
 
 use openidconnect::{
-    core::{
-        CoreAuthenticationFlow, CoreGenderClaim, CoreIdTokenFields, CoreJsonWebKeyType,
-        CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
-    },
-    reqwest::async_http_client,
-    AccessTokenHash, AuthorizationCode, CsrfToken, ExtraTokenFields, IdTokenFields, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope,
-    StandardTokenResponse, TokenResponse, TokenType,
+    core::CoreAuthenticationFlow, reqwest::async_http_client, AccessTokenHash, AuthorizationCode,
+    CsrfToken, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
+    TokenResponse,
 };
 
 use crate::{
     error::{Error, MiddlewareError},
     extractor::{OidcAccessToken, OidcClaims},
-    AdditionalClaims, BoxError, IdToken, OidcClient, OidcQuery, OidcSession, SESSION_KEY,
+    AdditionalClaims, BoxError, OidcClient, OidcQuery, OidcSession, SESSION_KEY,
 };
 
 /// Layer for the [OidcLoginMiddleware].
@@ -419,6 +413,7 @@ pub fn strip_oidc_from_path(base_url: Uri, uri: &Uri) -> Result<Uri, MiddlewareE
                             !x.starts_with("code")
                                 && !x.starts_with("state")
                                 && !x.starts_with("session_state")
+                                && !x.starts_with("iss")
                         })
                         .map(|x| x.to_string())
                         .reduce(|acc, x| acc + "&" + &x)
