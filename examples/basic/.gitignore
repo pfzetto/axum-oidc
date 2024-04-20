@@ -2,3 +2,4 @@
 keycloak_example/keycloak_data/*
 !keycloak_example/keycloak_data/keep
 .idea
+target
