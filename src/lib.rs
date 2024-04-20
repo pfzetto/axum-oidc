@@ -103,6 +103,8 @@ pub struct OidcClient<AC: AdditionalClaims> {
 }
 
 impl<AC: AdditionalClaims> OidcClient<AC> {
+    /// create a new [`OidcClient`] by fetching the required information from the
+    /// `/.well-known/openid-configuration` endpoint of the issuer.
     pub async fn discover_new(
         application_base_url: Uri,
         issuer: String,
@@ -157,6 +159,7 @@ struct OidcSession<AC: AdditionalClaims> {
     csrf_token: CsrfToken,
     pkce_verifier: PkceCodeVerifier,
     authenticated: Option<AuthenticatedSession<AC>>,
+    refresh_token: Option<RefreshToken>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -164,7 +167,6 @@ struct OidcSession<AC: AdditionalClaims> {
 struct AuthenticatedSession<AC: AdditionalClaims> {
     id_token: IdToken<AC>,
     access_token: AccessToken,
-    refresh_token: Option<RefreshToken>,
 }
 
 /// additional metadata that is discovered on client creation via the
@@ -174,3 +176,7 @@ struct AdditionalProviderMetadata {
     end_session_endpoint: Option<String>,
 }
 impl openidconnect::AdditionalProviderMetadata for AdditionalProviderMetadata {}
+
+/// response extension flag to signal the [`OidcAuthLayer`] that the session should be cleared.
+#[derive(Clone, Copy)]
+pub struct ClearSessionFlag;

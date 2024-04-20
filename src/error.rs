@@ -13,6 +13,9 @@ pub enum ExtractorError {
 
     #[error("rp initiated logout information not found")]
     RpInitiatedLogoutInformationNotFound,
+
+    #[error("could not build rp initiated logout uri")]
+    FailedToCreateRpInitiatedLogoutUri,
 }
 
 #[derive(Debug, Error)]
@@ -86,6 +89,9 @@ impl IntoResponse for ExtractorError {
         match self {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
             Self::RpInitiatedLogoutInformationNotFound => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "intenal server error").into_response()
+            }
+            Self::FailedToCreateRpInitiatedLogoutUri => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "intenal server error").into_response()
             }
         }
