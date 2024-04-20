@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  # THIS SETUP IS PNLY FOR TESTING PRUPOSES, PLEASE DO NOT USE IT IN PRODUCTION
+  keycloak:
+    image: quay.io/keycloak/keycloak:19.0.2
+    command: start-dev
+    ports:
+      - "8989:8080"
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    user: "${UID}:${GID}"
+    volumes:
+      - ./keycloak_data:/opt/keycloak/data/h2/:z
