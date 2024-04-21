@@ -26,11 +26,11 @@ use openidconnect::{
 use crate::{
     error::{Error, MiddlewareError},
     extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout},
-    AdditionalClaims, AuthenticatedSession, BoxError, IdToken, OidcClient, OidcQuery, OidcSession,
-    SESSION_KEY,
+    AdditionalClaims, AuthenticatedSession, BoxError, ClearSessionFlag, IdToken, OidcClient,
+    OidcQuery, OidcSession, SESSION_KEY,
 };
 
-/// Layer for the [OidcLoginMiddleware].
+/// Layer for the [`OidcLoginMiddleware`].
 #[derive(Clone, Default)]
 pub struct OidcLoginLayer<AC>
 where
@@ -62,7 +62,7 @@ where
 }
 
 /// This middleware forces the user to be authenticated and redirects the user to the OpenID Connect
-/// Issuer to authenticate. This Middleware needs to be loaded afer [OidcAuthMiddleware].
+/// Issuer to authenticate. This Middleware needs to be loaded afer [`OidcAuthMiddleware`].
 #[derive(Clone)]
 pub struct OidcLoginMiddleware<I, AC>
 where
@@ -164,8 +164,11 @@ where
                     login_session.authenticated = Some(AuthenticatedSession {
                         id_token: id_token.clone(),
                         access_token: token_response.access_token().clone(),
-                        refresh_token: token_response.refresh_token().cloned(),
                     });
+                    let refresh_token = token_response.refresh_token().cloned();
+                    if let Some(refresh_token) = refresh_token {
+                        login_session.refresh_token = Some(refresh_token);
+                    }
 
                     session.insert(SESSION_KEY, login_session).await?;
 
@@ -193,6 +196,7 @@ where
                         csrf_token,
                         pkce_verifier,
                         authenticated: None,
+                        refresh_token: None,
                     };
 
                     session.insert(SESSION_KEY, oidc_session).await?;
@@ -204,7 +208,7 @@ where
     }
 }
 
-/// Layer for the [OidcAuthMiddleware].
+/// Layer for the [`OidcAuthMiddleware`].
 #[derive(Clone)]
 pub struct OidcAuthLayer<AC>
 where
@@ -294,7 +298,8 @@ where
             let session = parts
                 .extensions
                 .get::<Session>()
-                .ok_or(MiddlewareError::SessionNotFound)?;
+                .ok_or(MiddlewareError::SessionNotFound)?
+                .clone();
             let mut login_session: Option<OidcSession<AC>> = session
                 .get(SESSION_KEY)
                 .await
@@ -320,16 +325,16 @@ where
                 if let Some((session, claims)) = id_token_claims {
                     // stored id token is valid and can be used
                     insert_extensions(&mut parts, claims.clone(), &oidcclient, session);
-                } else if let Some(refresh_token) = login_session
-                    .authenticated
-                    .as_ref()
-                    .and_then(|x| x.refresh_token.as_ref())
-                {
-                    if let Some((claims, authenticated_session)) =
+                } else if let Some(refresh_token) = login_session.refresh_token.as_ref() {
+                    if let Some((claims, authenticated_session, refresh_token)) =
                         try_refresh_token(&oidcclient, refresh_token, &login_session.nonce).await?
                     {
                         insert_extensions(&mut parts, claims, &oidcclient, &authenticated_session);
                         login_session.authenticated = Some(authenticated_session);
+
+                        if let Some(refresh_token) = refresh_token {
+                            login_session.refresh_token = Some(refresh_token);
+                        }
                     };
 
                     // save refreshed session or delete it when the token couldn't be refreshed
@@ -350,6 +355,13 @@ where
                 .await
                 .map_err(|e| MiddlewareError::NextMiddleware(e.into()))?
                 .into_response();
+
+            let has_logout_ext = response.extensions().get::<ClearSessionFlag>().is_some();
+            if let (true, Some(mut login_session)) = (has_logout_ext, login_session) {
+                login_session.authenticated = None;
+                session.insert(SESSION_KEY, login_session).await?;
+            }
+
             Ok(response)
         })
     }
@@ -433,8 +445,14 @@ async fn try_refresh_token<AC: AdditionalClaims>(
     client: &OidcClient<AC>,
     refresh_token: &RefreshToken,
     nonce: &Nonce,
-) -> Result<Option<(IdTokenClaims<AC, CoreGenderClaim>, AuthenticatedSession<AC>)>, MiddlewareError>
-{
+) -> Result<
+    Option<(
+        IdTokenClaims<AC, CoreGenderClaim>,
+        AuthenticatedSession<AC>,
+        Option<RefreshToken>,
+    )>,
+    MiddlewareError,
+> {
     let mut refresh_request = client.client.exchange_refresh_token(refresh_token);
 
     for scope in client.scopes.iter() {
@@ -454,10 +472,13 @@ async fn try_refresh_token<AC: AdditionalClaims>(
             let authenticated_session = AuthenticatedSession {
                 id_token: id_token.clone(),
                 access_token: token_response.access_token().clone(),
-                refresh_token: token_response.refresh_token().cloned(),
             };
 
-            Ok(Some((claims.clone(), authenticated_session)))
+            Ok(Some((
+                claims.clone(),
+                authenticated_session,
+                token_response.refresh_token().cloned(),
+            )))
         }
         Err(ServerResponse(e)) if *e.error() == CoreErrorResponseType::InvalidGrant => {
             // Refresh failed, refresh_token most likely expired or

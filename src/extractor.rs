@@ -1,14 +1,15 @@
 use std::{borrow::Cow, ops::Deref};
 
-use crate::{error::ExtractorError, AdditionalClaims};
+use crate::{error::ExtractorError, AdditionalClaims, ClearSessionFlag};
 use async_trait::async_trait;
-use axum_core::extract::FromRequestParts;
+use axum::response::Redirect;
+use axum_core::{extract::FromRequestParts, response::IntoResponse};
 use http::{request::Parts, uri::PathAndQuery, Uri};
 use openidconnect::{core::CoreGenderClaim, IdTokenClaims};
 
 /// Extractor for the OpenID Connect Claims.
 ///
-/// This Extractor will only return the Claims when the cached session is valid and [crate::middleware::OidcAuthMiddleware] is loaded.
+/// This Extractor will only return the Claims when the cached session is valid and [`crate::middleware::OidcAuthMiddleware`] is loaded.
 #[derive(Clone)]
 pub struct OidcClaims<AC: AdditionalClaims>(pub IdTokenClaims<AC, CoreGenderClaim>);
 
@@ -48,7 +49,7 @@ where
 
 /// Extractor for the OpenID Connect Access Token.
 ///
-/// This Extractor will only return the Access Token when the cached session is valid and [crate::middleware::OidcAuthMiddleware] is loaded.
+/// This Extractor will only return the Access Token when the cached session is valid and [`crate::middleware::OidcAuthMiddleware`] is loaded.
 #[derive(Clone)]
 pub struct OidcAccessToken(pub String);
 
@@ -84,7 +85,7 @@ impl AsRef<str> for OidcAccessToken {
 
 /// Extractor for the [OpenID Connect RP-Initialized Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) URL
 ///
-/// This Extractor will only succed when the cached session is valid, [crate::middleware::OidcAuthMiddleware] is loaded and the issuer supports RP-Initialized Logout.
+/// This Extractor will only succed when the cached session is valid, [`crate::middleware::OidcAuthMiddleware`] is loaded and the issuer supports RP-Initialized Logout.
 #[derive(Clone)]
 pub struct OidcRpInitiatedLogout {
     pub(crate) end_session_endpoint: Uri,
@@ -106,7 +107,9 @@ impl OidcRpInitiatedLogout {
         self.state = Some(state);
         self
     }
-    /// get the uri that the client needs to access for logout
+    /// get the uri that the client needs to access for logout. This does **NOT** delete the
+    /// session in axum-oidc. You should use the [`ClearSessionFlag`] responder or include
+    /// [`OidcRpInitiatedLogout`] in the response extensions
     pub fn uri(&self) -> Result<Uri, http::Error> {
         let mut parts = self.end_session_endpoint.clone().into_parts();
 
@@ -157,5 +160,19 @@ where
             .get::<Self>()
             .cloned()
             .ok_or(ExtractorError::Unauthorized)
+    }
+}
+
+impl IntoResponse for OidcRpInitiatedLogout {
+    /// redirect to the logout uri and signal the [`crate::middleware::OidcAuthMiddleware`] that
+    /// the session should be cleared
+    fn into_response(self) -> axum_core::response::Response {
+        if let Ok(uri) = self.uri() {
+            let mut response = Redirect::temporary(&uri.to_string()).into_response();
+            response.extensions_mut().insert(ClearSessionFlag);
+            response
+        } else {
+            ExtractorError::FailedToCreateRpInitiatedLogoutUri.into_response()
+        }
     }
 }
