@@ -1,3 +1,5 @@
+**THIS IS AN OLD VERSION! PLEASE USE THE LATEST VERSION IF POSSIBLE!**
+
 This Library allows using [OpenID Connect](https://openid.net/developers/how-connect-works/) with [axum](https://github.com/tokio-rs/axum). 
 It authenticates the user with the OpenID Conenct Issuer and provides Extractors.
 
