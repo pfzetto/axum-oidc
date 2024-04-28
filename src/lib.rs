@@ -148,7 +148,7 @@ struct OidcQuery {
     code: String,
     state: String,
     #[allow(dead_code)]
-    session_state: String,
+    session_state: Option<String>,
 }
 
 /// oidc session
