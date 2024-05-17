@@ -14,9 +14,9 @@ use openidconnect::{
         CoreRevocationErrorResponse, CoreSubjectIdentifierType, CoreTokenIntrospectionResponse,
         CoreTokenType,
     },
-    reqwest::async_http_client,
-    AccessToken, ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields, IdTokenFields,
-    IssuerUrl, Nonce, PkceCodeVerifier, RefreshToken, StandardErrorResponse, StandardTokenResponse,
+    AccessToken, ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields, HttpRequest,
+    HttpResponse, IdTokenFields, IssuerUrl, Nonce, PkceCodeVerifier, RefreshToken,
+    StandardErrorResponse, StandardTokenResponse,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -72,7 +72,7 @@ type Client<AC> = openidconnect::Client<
     CoreRevocationErrorResponse,
 >;
 
-type ProviderMetadata = openidconnect::ProviderMetadata<
+pub type ProviderMetadata = openidconnect::ProviderMetadata<
     AdditionalProviderMetadata,
     CoreAuthDisplay,
     CoreClientAuthMethod,
@@ -103,17 +103,14 @@ pub struct OidcClient<AC: AdditionalClaims> {
 }
 
 impl<AC: AdditionalClaims> OidcClient<AC> {
-    /// create a new [`OidcClient`] by fetching the required information from the
-    /// `/.well-known/openid-configuration` endpoint of the issuer.
-    pub async fn discover_new(
+    /// create a new [`OidcClient`] from an existing [`ProviderMetadata`].
+    pub fn from_provider_metadata(
+        provider_metadata: ProviderMetadata,
         application_base_url: Uri,
-        issuer: String,
         client_id: String,
         client_secret: Option<String>,
         scopes: Vec<String>,
     ) -> Result<Self, Error> {
-        let provider_metadata =
-            ProviderMetadata::discover_async(IssuerUrl::new(issuer)?, async_http_client).await?;
         let end_session_endpoint = provider_metadata
             .additional_metadata()
             .end_session_endpoint
@@ -133,6 +130,79 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
             application_base_url,
             end_session_endpoint,
         })
+    }
+
+    /// create a new [`OidcClient`] by fetching the required information from the
+    /// `/.well-known/openid-configuration` endpoint of the issuer.
+    pub async fn discover_new(
+        application_base_url: Uri,
+        issuer: String,
+        client_id: String,
+        client_secret: Option<String>,
+        scopes: Vec<String>,
+    ) -> Result<Self, Error> {
+        let client = reqwest::Client::default();
+        Self::discover_new_with_client(
+            application_base_url,
+            issuer,
+            client_id,
+            client_secret,
+            scopes,
+            &client,
+        )
+        .await
+    }
+
+    /// create a new [`OidcClient`] by fetching the required information from the
+    /// `/.well-known/openid-configuration` endpoint of the issuer using the provided
+    /// `reqwest::Client`.
+    pub async fn discover_new_with_client(
+        application_base_url: Uri,
+        issuer: String,
+        client_id: String,
+        client_secret: Option<String>,
+        scopes: Vec<String>,
+        client: &reqwest::Client,
+    ) -> Result<Self, Error> {
+        // modified version of `openidconnect::reqwest::async_client::async_http_client`.
+        let async_http_client = |request: HttpRequest| async move {
+            let mut request_builder = client
+                .request(request.method, request.url.as_str())
+                .body(request.body);
+            for (name, value) in &request.headers {
+                request_builder = request_builder.header(name.as_str(), value.as_bytes());
+            }
+            let request = request_builder
+                .build()
+                .map_err(openidconnect::reqwest::Error::Reqwest)?;
+
+            let response = client
+                .execute(request)
+                .await
+                .map_err(openidconnect::reqwest::Error::Reqwest)?;
+
+            let status_code = response.status();
+            let headers = response.headers().to_owned();
+            let chunks = response
+                .bytes()
+                .await
+                .map_err(openidconnect::reqwest::Error::Reqwest)?;
+            Ok(HttpResponse {
+                status_code,
+                headers,
+                body: chunks.to_vec(),
+            })
+        };
+
+        let provider_metadata =
+            ProviderMetadata::discover_async(IssuerUrl::new(issuer)?, async_http_client).await?;
+        Self::from_provider_metadata(
+            provider_metadata,
+            application_base_url,
+            client_id,
+            client_secret,
+            scopes,
+        )
     }
 }
 
@@ -172,7 +242,7 @@ struct AuthenticatedSession<AC: AdditionalClaims> {
 /// additional metadata that is discovered on client creation via the
 /// `.well-knwon/openid-configuration` endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AdditionalProviderMetadata {
+pub struct AdditionalProviderMetadata {
     end_session_endpoint: Option<String>,
 }
 impl openidconnect::AdditionalProviderMetadata for AdditionalProviderMetadata {}
