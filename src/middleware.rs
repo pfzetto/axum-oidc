@@ -15,12 +15,7 @@ use tower_service::Service;
 use tower_sessions::Session;
 
 use openidconnect::{
-    core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim},
-    reqwest::async_http_client,
-    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, IdTokenClaims, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
-    RequestTokenError::ServerResponse,
-    Scope, TokenResponse,
+    core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim}, reqwest::async_http_client, AccessToken, AccessTokenHash, AuthenticationContextClass, AuthorizationCode, CsrfToken, IdTokenClaims, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, RequestTokenError::ServerResponse, Scope, TokenResponse
 };
 
 use crate::{
@@ -187,6 +182,8 @@ where
                         for scope in oidcclient.scopes.iter() {
                             auth = auth.add_scope(Scope::new(scope.to_string()));
                         }
+
+                        auth = auth.add_auth_context_value(AuthenticationContextClass::new(String::from("2")));
 
                         auth.set_pkce_challenge(pkce_challenge).url()
                     };
