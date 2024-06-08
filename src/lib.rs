@@ -100,6 +100,7 @@ pub struct OidcClient<AC: AdditionalClaims> {
     client: Client<AC>,
     application_base_url: Uri,
     end_session_endpoint: Option<Uri>,
+    acr: Option<String>,
 }
 
 impl<AC: AdditionalClaims> OidcClient<AC> {
@@ -110,6 +111,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
         client_id: String,
         client_secret: Option<String>,
         scopes: Vec<String>,
+        acr: Option<String>,
     ) -> Result<Self, Error> {
         let end_session_endpoint = provider_metadata
             .additional_metadata()
@@ -129,6 +131,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
             client_id,
             application_base_url,
             end_session_endpoint,
+            acr,
         })
     }
 
@@ -140,6 +143,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
         client_id: String,
         client_secret: Option<String>,
         scopes: Vec<String>,
+        acr: Option<String>,
     ) -> Result<Self, Error> {
         let client = reqwest::Client::default();
         Self::discover_new_with_client(
@@ -149,6 +153,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
             client_secret,
             scopes,
             &client,
+            acr,
         )
         .await
     }
@@ -163,6 +168,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
         client_secret: Option<String>,
         scopes: Vec<String>,
         client: &reqwest::Client,
+        acr: Option<String>,
     ) -> Result<Self, Error> {
         // modified version of `openidconnect::reqwest::async_client::async_http_client`.
         let async_http_client = |request: HttpRequest| async move {
@@ -202,6 +208,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
             client_id,
             client_secret,
             scopes,
+            acr,
         )
     }
 }

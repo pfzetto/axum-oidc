@@ -17,8 +17,9 @@ use tower_sessions::Session;
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim},
     reqwest::async_http_client,
-    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, IdTokenClaims, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
+    AccessToken, AccessTokenHash, AuthenticationContextClass, AuthorizationCode, CsrfToken,
+    IdTokenClaims, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl,
+    RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse,
 };
@@ -187,6 +188,10 @@ where
                         for scope in oidcclient.scopes.iter() {
                             auth = auth.add_scope(Scope::new(scope.to_string()));
                         }
+                        if let Some(acr) = oidcclient.acr {
+                            auth =
+                                auth.add_auth_context_value(AuthenticationContextClass::new(acr));
+                        }
 
                         auth.set_pkce_challenge(pkce_challenge).url()
                     };
@@ -228,6 +233,7 @@ impl<AC: AdditionalClaims> OidcAuthLayer<AC> {
         client_id: String,
         client_secret: Option<String>,
         scopes: Vec<String>,
+        acr: Option<String>,
     ) -> Result<Self, Error> {
         Ok(Self {
             client: OidcClient::<AC>::discover_new(
@@ -236,6 +242,7 @@ impl<AC: AdditionalClaims> OidcAuthLayer<AC> {
                 client_id,
                 client_secret,
                 scopes,
+                acr,
             )
             .await?,
         })
