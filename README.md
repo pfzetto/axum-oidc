@@ -1,5 +1,5 @@
 This Library allows using [OpenID Connect](https://openid.net/developers/how-connect-works/) with [axum](https://github.com/tokio-rs/axum). 
-It authenticates the user with the OpenID Conenct Issuer and provides Extractors.
+It authenticates the user with the OpenID Connect Issuer and provides Extractors.
 
 # Usage
 The `OidcAuthLayer` must be loaded on any handler that might use the extractors.
@@ -22,7 +22,7 @@ Take a look at the `examples` folder for examples.
 
 # Older Versions
 All versions on [crates.io](https://crates.io) are available as git tags.
-Additonal all minor versions have their own branch (format `vX.Y` where `X` is the major and `Y` is the minor version) where bug fixes are implemented.
+Additional all minor versions have their own branch (format `vX.Y` where `X` is the major and `Y` is the minor version) where bug fixes are implemented.
 Examples for each version can be found there in the previously mentioned `examples` folder.
 
 # Contributing
