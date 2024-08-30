@@ -155,11 +155,14 @@ where
     type Rejection = ExtractorError;
 
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        parts
+        match parts
             .extensions
-            .get::<Self>()
+            .get::<Option<Self>>()
             .cloned()
-            .ok_or(ExtractorError::Unauthorized)
+            .ok_or(ExtractorError::Unauthorized)?{
+            Some(this) => Ok(this),
+            None => Err(ExtractorError::RpInitiatedLogoutNotSupported),
+            }
     }
 }
 

@@ -409,15 +409,16 @@ fn insert_extensions<AC: AdditionalClaims>(
     parts.extensions.insert(OidcAccessToken(
         authenticated_session.access_token.secret().to_string(),
     ));
-    if let Some(end_session_endpoint) = &client.end_session_endpoint {
-        parts.extensions.insert(OidcRpInitiatedLogout {
+    let rp_initiated_logout = client.end_session_endpoint.as_ref().map(|end_session_endpoint|
+OidcRpInitiatedLogout {
             end_session_endpoint: end_session_endpoint.clone(),
             id_token_hint: authenticated_session.id_token.to_string(),
             client_id: client.client_id.clone(),
             post_logout_redirect_uri: None,
             state: None,
-        });
-    }
+        }
+    );
+        parts.extensions.insert(rp_initiated_logout);
 }
 
 /// Verify the access token hash to ensure that the access token hasn't been substituted for

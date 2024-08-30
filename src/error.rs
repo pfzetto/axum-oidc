@@ -11,11 +11,12 @@ pub enum ExtractorError {
     #[error("unauthorized")]
     Unauthorized,
 
-    #[error("rp initiated logout information not found")]
-    RpInitiatedLogoutInformationNotFound,
+    #[error("rp initiated logout not supported by issuer")]
+    RpInitiatedLogoutNotSupported,
 
     #[error("could not build rp initiated logout uri")]
     FailedToCreateRpInitiatedLogoutUri,
+
 }
 
 #[derive(Debug, Error)]
@@ -88,7 +89,7 @@ impl IntoResponse for ExtractorError {
     fn into_response(self) -> axum_core::response::Response {
         match self {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
-            Self::RpInitiatedLogoutInformationNotFound => {
+            Self::RpInitiatedLogoutNotSupported => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "intenal server error").into_response()
             }
             Self::FailedToCreateRpInitiatedLogoutUri => {
