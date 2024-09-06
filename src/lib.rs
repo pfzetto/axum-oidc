@@ -98,6 +98,7 @@ pub struct OidcClient<AC: AdditionalClaims> {
     scopes: Vec<String>,
     client_id: String,
     client: Client<AC>,
+    http_client: reqwest::Client,
     application_base_url: Uri,
     end_session_endpoint: Option<Uri>,
 }
@@ -129,6 +130,37 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
             client_id,
             application_base_url,
             end_session_endpoint,
+            http_client: reqwest::Client::default(),
+        })
+    }
+    /// create a new [`OidcClient`] from an existing [`ProviderMetadata`].
+    pub fn from_provider_metadata_and_client(
+        provider_metadata: ProviderMetadata,
+        application_base_url: Uri,
+        client_id: String,
+        client_secret: Option<String>,
+        scopes: Vec<String>,
+        http_client: reqwest::Client,
+    ) -> Result<Self, Error> {
+        let end_session_endpoint = provider_metadata
+            .additional_metadata()
+            .end_session_endpoint
+            .clone()
+            .map(Uri::from_maybe_shared)
+            .transpose()
+            .map_err(Error::InvalidEndSessionEndpoint)?;
+        let client = Client::from_provider_metadata(
+            provider_metadata,
+            ClientId::new(client_id.clone()),
+            client_secret.map(ClientSecret::new),
+        );
+        Ok(Self {
+            scopes,
+            client,
+            client_id,
+            application_base_url,
+            end_session_endpoint,
+            http_client,
         })
     }
 
@@ -162,6 +194,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
         client_id: String,
         client_secret: Option<String>,
         scopes: Vec<String>,
+        //TODO remove borrow with next breaking version
         client: &reqwest::Client,
     ) -> Result<Self, Error> {
         // modified version of `openidconnect::reqwest::async_client::async_http_client`.
@@ -196,12 +229,13 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
 
         let provider_metadata =
             ProviderMetadata::discover_async(IssuerUrl::new(issuer)?, async_http_client).await?;
-        Self::from_provider_metadata(
+        Self::from_provider_metadata_and_client(
             provider_metadata,
             application_base_url,
             client_id,
             client_secret,
             scopes,
+            client.clone(),
         )
     }
 }

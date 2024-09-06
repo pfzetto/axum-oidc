@@ -1,5 +1,6 @@
 use std::{
     marker::PhantomData,
+    pin::Pin,
     task::{Context, Poll},
 };
 
@@ -8,7 +9,7 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use axum_core::{extract::FromRequestParts, response::Response};
-use futures_util::future::BoxFuture;
+use futures_util::{future::BoxFuture, Future};
 use http::{request::Parts, uri::PathAndQuery, Request, Uri};
 use tower_layer::Layer;
 use tower_service::Service;
@@ -16,9 +17,9 @@ use tower_sessions::Session;
 
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim},
-    reqwest::async_http_client,
-    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, IdTokenClaims, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
+    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, HttpRequest, HttpResponse,
+    IdTokenClaims, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl,
+    RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse,
 };
@@ -149,7 +150,7 @@ where
                         .set_pkce_verifier(PkceCodeVerifier::new(
                             login_session.pkce_verifier.secret().to_string(),
                         ))
-                        .request_async(async_http_client)
+                        .request_async(async_http_client(&oidcclient.http_client))
                         .await?;
 
                     // Extract the ID token claims after verifying its authenticity and nonce.
@@ -409,16 +410,17 @@ fn insert_extensions<AC: AdditionalClaims>(
     parts.extensions.insert(OidcAccessToken(
         authenticated_session.access_token.secret().to_string(),
     ));
-    let rp_initiated_logout = client.end_session_endpoint.as_ref().map(|end_session_endpoint|
-OidcRpInitiatedLogout {
+    let rp_initiated_logout = client
+        .end_session_endpoint
+        .as_ref()
+        .map(|end_session_endpoint| OidcRpInitiatedLogout {
             end_session_endpoint: end_session_endpoint.clone(),
             id_token_hint: authenticated_session.id_token.to_string(),
             client_id: client.client_id.clone(),
             post_logout_redirect_uri: None,
             state: None,
-        }
-    );
-        parts.extensions.insert(rp_initiated_logout);
+        });
+    parts.extensions.insert(rp_initiated_logout);
 }
 
 /// Verify the access token hash to ensure that the access token hasn't been substituted for
@@ -460,7 +462,10 @@ async fn try_refresh_token<AC: AdditionalClaims>(
         refresh_request = refresh_request.add_scope(Scope::new(scope.to_string()));
     }
 
-    match refresh_request.request_async(async_http_client).await {
+    match refresh_request
+        .request_async(async_http_client(&client.http_client))
+        .await
+    {
         Ok(token_response) => {
             // Extract the ID token claims after verifying its authenticity and nonce.
             let id_token = token_response
@@ -487,5 +492,49 @@ async fn try_refresh_token<AC: AdditionalClaims>(
             Ok(None)
         }
         Err(err) => Err(err.into()),
+    }
+}
+
+/// `openidconnect::reqwest::async_http_client` that uses a custom `reqwest::client`
+fn async_http_client<'a>(
+    client: &'a reqwest::Client,
+) -> impl FnOnce(
+    HttpRequest,
+) -> Pin<
+    Box<
+        dyn Future<Output = Result<HttpResponse, openidconnect::reqwest::Error<reqwest::Error>>>
+            + Send
+            + 'a,
+    >,
+> {
+    move |request: HttpRequest| {
+        Box::pin(async move {
+            let mut request_builder = client
+                .request(request.method, request.url.as_str())
+                .body(request.body);
+            for (name, value) in &request.headers {
+                request_builder = request_builder.header(name.as_str(), value.as_bytes());
+            }
+            let request = request_builder
+                .build()
+                .map_err(openidconnect::reqwest::Error::Reqwest)?;
+
+            let response = client
+                .execute(request)
+                .await
+                .map_err(openidconnect::reqwest::Error::Reqwest)?;
+
+            let status_code = response.status();
+            let headers = response.headers().to_owned();
+            let chunks = response
+                .bytes()
+                .await
+                .map_err(openidconnect::reqwest::Error::Reqwest)?;
+            Ok(HttpResponse {
+                status_code,
+                headers,
+                body: chunks.to_vec(),
+            })
+        })
     }
 }
