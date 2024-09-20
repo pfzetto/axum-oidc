@@ -25,3 +25,14 @@ serde = "1.0"
 futures-util = "0.3"
 reqwest = { version = "0.11", default-features = false }
 urlencoding = "2.1"
+serde_json = "1.0.128"
+
+[dev-dependencies]
+axum-test = "15.7.1"
+testcontainers = "0.22.0"
+reqwest = { version = "0.11", default-features = false, features = ["cookies"] }
+tower = { version = "0.5.1", features = ["util"] }
+tokio = { version = "1.40.0", features = ["full"] }
+regex = "1.10.6"
+serde_json = "1.0.128"
+tower-sessions = { version = "0.12", default-features = false, features = [ "memory-store", "axum-core" ] }
