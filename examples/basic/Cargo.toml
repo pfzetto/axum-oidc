@@ -10,7 +10,7 @@ tokio = { version = "1.37", features = ["net", "macros", "rt-multi-thread"] }
 axum = "0.7"
 axum-oidc = { path = "./../.." }
 tower = "0.4"
-tower-sessions = "0.12"
+tower-sessions = "0.13"
 
 dotenvy = "0.15"
 
