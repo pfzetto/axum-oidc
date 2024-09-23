@@ -72,7 +72,7 @@ async fn basic_login_oidc() {
 
     let server = axum_test::TestServerConfig::builder()
         .save_cookies()
-        .http_transport()
+        .http_transport_with_ip_port(Some("127.0.0.1".parse().unwrap()), Some(3000))
         .build_server(app)
         .unwrap();
 
