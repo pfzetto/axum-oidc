@@ -1,9 +1,11 @@
-use std::{borrow::Cow, ops::Deref};
+use std::{borrow::Cow, convert::Infallible, ops::Deref};
 
 use crate::{error::ExtractorError, AdditionalClaims, ClearSessionFlag};
-use async_trait::async_trait;
 use axum::response::Redirect;
-use axum_core::{extract::FromRequestParts, response::IntoResponse};
+use axum_core::{
+    extract::{FromRequestParts, OptionalFromRequestParts},
+    response::IntoResponse,
+};
 use http::{request::Parts, uri::PathAndQuery, Uri};
 use openidconnect::{core::CoreGenderClaim, IdTokenClaims};
 
@@ -13,7 +15,6 @@ use openidconnect::{core::CoreGenderClaim, IdTokenClaims};
 #[derive(Clone)]
 pub struct OidcClaims<AC: AdditionalClaims>(pub IdTokenClaims<AC, CoreGenderClaim>);
 
-#[async_trait]
 impl<S, AC> FromRequestParts<S> for OidcClaims<AC>
 where
     S: Send + Sync,
@@ -27,6 +28,18 @@ where
             .get::<Self>()
             .cloned()
             .ok_or(ExtractorError::Unauthorized)
+    }
+}
+
+impl<S, AC> OptionalFromRequestParts<S> for OidcClaims<AC>
+where
+    S: Send + Sync,
+    AC: AdditionalClaims,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Option<Self>, Self::Rejection> {
+        Ok(parts.extensions.get::<Self>().cloned())
     }
 }
 
@@ -53,7 +66,6 @@ where
 #[derive(Clone)]
 pub struct OidcAccessToken(pub String);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for OidcAccessToken
 where
     S: Send + Sync,
@@ -66,6 +78,17 @@ where
             .get::<Self>()
             .cloned()
             .ok_or(ExtractorError::Unauthorized)
+    }
+}
+
+impl<S> OptionalFromRequestParts<S> for OidcAccessToken
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Option<Self>, Self::Rejection> {
+        Ok(parts.extensions.get::<Self>().cloned())
     }
 }
 
@@ -147,7 +170,6 @@ impl OidcRpInitiatedLogout {
     }
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for OidcRpInitiatedLogout
 where
     S: Send + Sync,
@@ -159,10 +181,22 @@ where
             .extensions
             .get::<Option<Self>>()
             .cloned()
-            .ok_or(ExtractorError::Unauthorized)?{
+            .ok_or(ExtractorError::Unauthorized)?
+        {
             Some(this) => Ok(this),
             None => Err(ExtractorError::RpInitiatedLogoutNotSupported),
-            }
+        }
+    }
+}
+
+impl<S> OptionalFromRequestParts<S> for OidcRpInitiatedLogout
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Option<Self>, Self::Rejection> {
+        Ok(parts.extensions.get::<Option<Self>>().cloned().flatten())
     }
 }
 

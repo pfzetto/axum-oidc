@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.37", features = ["net", "macros", "rt-multi-thread"] }
-axum = "0.7"
+axum = { version = "0.8", features = ["macros"] }
 axum-oidc = { path = "./../.." }
 tower = "0.4"
 tower-sessions = "0.13"
