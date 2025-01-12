@@ -1,21 +1,20 @@
 use log::info;
 use std::time::Duration;
-use testcontainers::*;
+use testcontainers::runners::AsyncRunner;
+use testcontainers::ContainerAsync;
 
 use testcontainers::core::ExecCommand;
-use testcontainers::{core::WaitFor, Container, Image, RunnableImage};
+use testcontainers::{core::WaitFor, Image, ImageExt};
 
 struct KeycloakImage;
 
 impl Image for KeycloakImage {
-    type Args = Vec<String>;
-
-    fn name(&self) -> String {
-        "quay.io/keycloak/keycloak".to_string()
+    fn name(&self) -> &str {
+        "quay.io/keycloak/keycloak"
     }
 
-    fn tag(&self) -> String {
-        "latest".to_string()
+    fn tag(&self) -> &str {
+        "latest"
     }
 
     fn ready_conditions(&self) -> Vec<WaitFor> {
@@ -23,8 +22,8 @@ impl Image for KeycloakImage {
     }
 }
 
-pub struct Keycloak<'a> {
-    container: Container<'a, KeycloakImage>,
+pub struct Keycloak {
+    container: ContainerAsync<KeycloakImage>,
     realms: Vec<Realm>,
     url: String,
 }
@@ -51,24 +50,28 @@ pub struct User {
     pub password: String,
 }
 
-impl<'a> Keycloak<'a> {
-    pub async fn start(realms: Vec<Realm>, docker: &'a clients::Cli) -> Keycloak<'a> {
+impl Keycloak {
+    pub async fn start(realms: Vec<Realm>) -> Keycloak {
         info!("starting keycloak");
 
-        let keycloak_image = RunnableImage::from((KeycloakImage, vec!["start-dev".to_string()]))
-            .with_env_var(("KEYCLOAK_ADMIN", "admin"))
-            .with_env_var(("KEYCLOAK_ADMIN_PASSWORD", "admin"));
-        let container = docker.run(keycloak_image);
+        let keycloak_image = KeycloakImage
+            .with_cmd(["start-dev".to_string()])
+            .with_env_var("KEYCLOAK_ADMIN", "admin")
+            .with_env_var("KEYCLOAK_ADMIN_PASSWORD", "admin");
+        let container = keycloak_image.start().await.unwrap();
 
         let keycloak = Self {
-            url: format!("http://127.0.0.1:{}", container.get_host_port_ipv4(8080),),
+            url: format!(
+                "http://127.0.0.1:{}",
+                container.get_host_port_ipv4(8080).await.unwrap()
+            ),
             container,
             realms,
         };
 
         let issuer = format!(
             "http://127.0.0.1:{}/realms/{}",
-            keycloak.container.get_host_port_ipv4(8080),
+            keycloak.container.get_host_port_ipv4(8080).await.unwrap(),
             "test"
         );
 
@@ -172,9 +175,14 @@ impl<'a> Keycloak<'a> {
     }
 
     async fn execute(&self, cmd: String) {
-        self.container.exec(ExecCommand {
-            cmd,
-            ready_conditions: vec![],
-        });
+        let mut result = self
+            .container
+            .exec(ExecCommand::new(
+                ["/bin/sh", "-c", cmd.as_str()].iter().copied(),
+            ))
+            .await
+            .unwrap();
+        // collect stdout to wait until command completion
+        let _output = String::from_utf8(result.stdout_to_vec().await.unwrap());
     }
 }

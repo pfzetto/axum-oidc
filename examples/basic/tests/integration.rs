@@ -2,15 +2,12 @@ mod keycloak;
 
 use headless_chrome::Browser;
 use log::info;
-use testcontainers::*;
 
 use crate::keycloak::{Client, Keycloak, Realm, User};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn first() {
     env_logger::init();
-
-    let docker = clients::Cli::default();
 
     let alice = User {
         username: "alice".to_string(),
@@ -25,14 +22,11 @@ async fn first() {
         client_secret: Some("123456".to_string()),
     };
 
-    let keycloak = Keycloak::start(
-        vec![Realm {
-            name: "test".to_string(),
-            users: vec![alice.clone()],
-            clients: vec![basic_client.clone()],
-        }],
-        &docker,
-    )
+    let keycloak = Keycloak::start(vec![Realm {
+        name: "test".to_string(),
+        users: vec![alice.clone()],
+        clients: vec![basic_client.clone()],
+    }])
     .await;
 
     info!("starting basic example app");

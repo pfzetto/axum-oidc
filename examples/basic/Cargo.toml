@@ -6,18 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.37", features = ["net", "macros", "rt-multi-thread"] }
-axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1.43", features = ["net", "macros", "rt-multi-thread"] }
+axum = { version = "0.8", features = [ "macros" ]}
 axum-oidc = { path = "./../.." }
-tower = "0.4"
-tower-sessions = "0.13"
+tower = "0.5"
+tower-sessions = "0.14"
 
 dotenvy = "0.15"
 
 [dev-dependencies]
-testcontainers = "0.15.0"
-tokio = { version = "1.37.0", features = ["rt-multi-thread"] }
-reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
-env_logger = "0.11.3"
-log = "0.4.21"
-headless_chrome = "1.0.9"
+testcontainers = "0.23"
+tokio = { version = "1.43", features = ["rt-multi-thread"] }
+reqwest = { version = "0.11", features = ["rustls-tls"], default-features = false }
+env_logger = "0.11"
+log = "0.4"
+headless_chrome = "1.0"

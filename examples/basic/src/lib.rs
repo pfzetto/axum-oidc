@@ -64,10 +64,11 @@ async fn authenticated(claims: OidcClaims<EmptyAdditionalClaims>) -> impl IntoRe
     format!("Hello {}", claims.subject().as_str())
 }
 
+#[axum::debug_handler]
 async fn maybe_authenticated(
-    claims: Option<OidcClaims<EmptyAdditionalClaims>>,
+    claims: Result<OidcClaims<EmptyAdditionalClaims>, axum_oidc::error::ExtractorError>,
 ) -> impl IntoResponse {
-    if let Some(claims) = claims {
+    if let Ok(claims) = claims {
         format!(
             "Hello {}! You are already logged in from another Handler.",
             claims.subject().as_str()

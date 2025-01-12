@@ -12,13 +12,13 @@ keywords = [ "axum", "oidc", "openidconnect", "authentication" ]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1.0"
+thiserror = "2.0"
 axum-core = "0.5"
 axum = { version = "0.8", default-features = false, features = [ "query" ] }
 tower-service = "0.3"
 tower-layer = "0.3"
-tower-sessions = { version = "0.13", default-features = false, features = [ "axum-core" ] }
-http = "1.1"
+tower-sessions = { version = "0.14", default-features = false, features = [ "axum-core" ] }
+http = "1.2"
 openidconnect = "3.5"
 serde = "1.0"
 futures-util = "0.3"
