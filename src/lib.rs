@@ -8,14 +8,13 @@ use http::Uri;
 use openidconnect::{
     core::{
         CoreAuthDisplay, CoreAuthPrompt, CoreClaimName, CoreClaimType, CoreClientAuthMethod,
-        CoreErrorResponseType, CoreGenderClaim, CoreGrantType, CoreJsonWebKey, CoreJsonWebKeyType,
-        CoreJsonWebKeyUse, CoreJweContentEncryptionAlgorithm, CoreJweKeyManagementAlgorithm,
-        CoreJwsSigningAlgorithm, CoreResponseMode, CoreResponseType, CoreRevocableToken,
-        CoreRevocationErrorResponse, CoreSubjectIdentifierType, CoreTokenIntrospectionResponse,
-        CoreTokenType,
+        CoreErrorResponseType, CoreGenderClaim, CoreGrantType, CoreJsonWebKey,
+        CoreJweContentEncryptionAlgorithm, CoreJweKeyManagementAlgorithm, CoreJwsSigningAlgorithm,
+        CoreResponseMode, CoreResponseType, CoreRevocableToken, CoreRevocationErrorResponse,
+        CoreSubjectIdentifierType, CoreTokenIntrospectionResponse, CoreTokenType,
     },
-    AccessToken, ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields, HttpRequest,
-    HttpResponse, IdTokenFields, IssuerUrl, Nonce, PkceCodeVerifier, RefreshToken,
+    AccessToken, ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet,
+    EndpointNotSet, EndpointSet, IdTokenFields, IssuerUrl, Nonce, PkceCodeVerifier, RefreshToken,
     StandardErrorResponse, StandardTokenResponse,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -41,7 +40,6 @@ type OidcTokenResponse<AC> = StandardTokenResponse<
         CoreGenderClaim,
         CoreJweContentEncryptionAlgorithm,
         CoreJwsSigningAlgorithm,
-        CoreJsonWebKeyType,
     >,
     CoreTokenType,
 >;
@@ -51,25 +49,34 @@ pub type IdToken<AZ> = openidconnect::IdToken<
     CoreGenderClaim,
     CoreJweContentEncryptionAlgorithm,
     CoreJwsSigningAlgorithm,
-    CoreJsonWebKeyType,
 >;
 
-type Client<AC> = openidconnect::Client<
+type Client<
+    AC,
+    HasAuthUrl = EndpointSet,
+    HasDeviceAuthUrl = EndpointNotSet,
+    HasIntrospectionUrl = EndpointNotSet,
+    HasRevocationUrl = EndpointNotSet,
+    HasTokenUrl = EndpointMaybeSet,
+    HasUserInfoUrl = EndpointMaybeSet,
+> = openidconnect::Client<
     AC,
     CoreAuthDisplay,
     CoreGenderClaim,
     CoreJweContentEncryptionAlgorithm,
-    CoreJwsSigningAlgorithm,
-    CoreJsonWebKeyType,
-    CoreJsonWebKeyUse,
     CoreJsonWebKey,
     CoreAuthPrompt,
     StandardErrorResponse<CoreErrorResponseType>,
     OidcTokenResponse<AC>,
-    CoreTokenType,
     CoreTokenIntrospectionResponse,
     CoreRevocableToken,
     CoreRevocationErrorResponse,
+    HasAuthUrl,
+    HasDeviceAuthUrl,
+    HasIntrospectionUrl,
+    HasRevocationUrl,
+    HasTokenUrl,
+    HasUserInfoUrl,
 >;
 
 pub type ProviderMetadata = openidconnect::ProviderMetadata<
@@ -81,9 +88,6 @@ pub type ProviderMetadata = openidconnect::ProviderMetadata<
     CoreGrantType,
     CoreJweContentEncryptionAlgorithm,
     CoreJweKeyManagementAlgorithm,
-    CoreJwsSigningAlgorithm,
-    CoreJsonWebKeyType,
-    CoreJsonWebKeyUse,
     CoreJsonWebKey,
     CoreResponseMode,
     CoreResponseType,
@@ -197,38 +201,8 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
         //TODO remove borrow with next breaking version
         client: &reqwest::Client,
     ) -> Result<Self, Error> {
-        // modified version of `openidconnect::reqwest::async_client::async_http_client`.
-        let async_http_client = |request: HttpRequest| async move {
-            let mut request_builder = client
-                .request(request.method, request.url.as_str())
-                .body(request.body);
-            for (name, value) in &request.headers {
-                request_builder = request_builder.header(name.as_str(), value.as_bytes());
-            }
-            let request = request_builder
-                .build()
-                .map_err(openidconnect::reqwest::Error::Reqwest)?;
-
-            let response = client
-                .execute(request)
-                .await
-                .map_err(openidconnect::reqwest::Error::Reqwest)?;
-
-            let status_code = response.status();
-            let headers = response.headers().to_owned();
-            let chunks = response
-                .bytes()
-                .await
-                .map_err(openidconnect::reqwest::Error::Reqwest)?;
-            Ok(HttpResponse {
-                status_code,
-                headers,
-                body: chunks.to_vec(),
-            })
-        };
-
         let provider_metadata =
-            ProviderMetadata::discover_async(IssuerUrl::new(issuer)?, async_http_client).await?;
+            ProviderMetadata::discover_async(IssuerUrl::new(issuer)?, client).await?;
         Self::from_provider_metadata_and_client(
             provider_metadata,
             application_base_url,
