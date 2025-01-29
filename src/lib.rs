@@ -184,7 +184,7 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
             client_id,
             client_secret,
             scopes,
-            &client,
+            client,
         )
         .await
     }
@@ -198,18 +198,17 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
         client_id: String,
         client_secret: Option<String>,
         scopes: Vec<String>,
-        //TODO remove borrow with next breaking version
-        client: &reqwest::Client,
+        client: reqwest::Client,
     ) -> Result<Self, Error> {
         let provider_metadata =
-            ProviderMetadata::discover_async(IssuerUrl::new(issuer)?, client).await?;
+            ProviderMetadata::discover_async(IssuerUrl::new(issuer)?, &client).await?;
         Self::from_provider_metadata_and_client(
             provider_metadata,
             application_base_url,
             client_id,
             client_secret,
             scopes,
-            client.clone(),
+            client,
         )
     }
 }
