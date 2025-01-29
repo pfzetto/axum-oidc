@@ -1,6 +1,5 @@
 use std::{
     marker::PhantomData,
-    pin::Pin,
     task::{Context, Poll},
 };
 
@@ -9,17 +8,16 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use axum_core::{extract::FromRequestParts, response::Response};
-use futures_util::{future::BoxFuture, Future};
+use futures_util::future::BoxFuture;
 use http::{request::Parts, uri::PathAndQuery, Request, Uri};
 use tower_layer::Layer;
 use tower_service::Service;
 use tower_sessions::Session;
 
 use openidconnect::{
-    core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim},
-    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, HttpRequest, HttpResponse,
-    IdTokenClaims, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl,
-    RefreshToken,
+    core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
+    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, IdTokenClaims, IdTokenVerifier,
+    Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse,
 };
@@ -145,22 +143,27 @@ where
 
                     let token_response = oidcclient
                         .client
-                        .exchange_code(AuthorizationCode::new(query.code.to_string()))
+                        .exchange_code(AuthorizationCode::new(query.code.to_string()))?
                         // Set the PKCE code verifier.
                         .set_pkce_verifier(PkceCodeVerifier::new(
                             login_session.pkce_verifier.secret().to_string(),
                         ))
-                        .request_async(async_http_client(&oidcclient.http_client))
+                        .request_async(&oidcclient.http_client)
                         .await?;
 
                     // Extract the ID token claims after verifying its authenticity and nonce.
                     let id_token = token_response
                         .id_token()
                         .ok_or(MiddlewareError::IdTokenMissing)?;
-                    let claims = id_token
-                        .claims(&oidcclient.client.id_token_verifier(), &login_session.nonce)?;
+                    let id_token_verifier = oidcclient.client.id_token_verifier();
+                    let claims = id_token.claims(&id_token_verifier, &login_session.nonce)?;
 
-                    validate_access_token_hash(id_token, token_response.access_token(), claims)?;
+                    validate_access_token_hash(
+                        id_token,
+                        id_token_verifier,
+                        token_response.access_token(),
+                        claims,
+                    )?;
 
                     login_session.authenticated = Some(AuthenticatedSession {
                         id_token: id_token.clone(),
@@ -428,12 +431,16 @@ fn insert_extensions<AC: AdditionalClaims>(
 /// Returns `Ok` when access token is valid
 fn validate_access_token_hash<AC: AdditionalClaims>(
     id_token: &IdToken<AC>,
+    id_token_verifier: IdTokenVerifier<CoreJsonWebKey>,
     access_token: &AccessToken,
     claims: &IdTokenClaims<AC, CoreGenderClaim>,
 ) -> Result<(), MiddlewareError> {
     if let Some(expected_access_token_hash) = claims.access_token_hash() {
-        let actual_access_token_hash =
-            AccessTokenHash::from_token(access_token, &id_token.signing_alg()?)?;
+        let actual_access_token_hash = AccessTokenHash::from_token(
+            access_token,
+            id_token.signing_alg()?,
+            id_token.signing_key(&id_token_verifier)?,
+        )?;
         if actual_access_token_hash == *expected_access_token_hash {
             Ok(())
         } else {
@@ -456,24 +463,27 @@ async fn try_refresh_token<AC: AdditionalClaims>(
     )>,
     MiddlewareError,
 > {
-    let mut refresh_request = client.client.exchange_refresh_token(refresh_token);
+    let mut refresh_request = client.client.exchange_refresh_token(refresh_token)?;
 
     for scope in client.scopes.iter() {
         refresh_request = refresh_request.add_scope(Scope::new(scope.to_string()));
     }
 
-    match refresh_request
-        .request_async(async_http_client(&client.http_client))
-        .await
-    {
+    match refresh_request.request_async(&client.http_client).await {
         Ok(token_response) => {
             // Extract the ID token claims after verifying its authenticity and nonce.
             let id_token = token_response
                 .id_token()
                 .ok_or(MiddlewareError::IdTokenMissing)?;
-            let claims = id_token.claims(&client.client.id_token_verifier(), nonce)?;
+            let id_token_verifier = client.client.id_token_verifier();
+            let claims = id_token.claims(&id_token_verifier, nonce)?;
 
-            validate_access_token_hash(id_token, token_response.access_token(), claims)?;
+            validate_access_token_hash(
+                id_token,
+                id_token_verifier,
+                token_response.access_token(),
+                claims,
+            )?;
 
             let authenticated_session = AuthenticatedSession {
                 id_token: id_token.clone(),
@@ -492,49 +502,5 @@ async fn try_refresh_token<AC: AdditionalClaims>(
             Ok(None)
         }
         Err(err) => Err(err.into()),
-    }
-}
-
-/// `openidconnect::reqwest::async_http_client` that uses a custom `reqwest::client`
-fn async_http_client<'a>(
-    client: &'a reqwest::Client,
-) -> impl FnOnce(
-    HttpRequest,
-) -> Pin<
-    Box<
-        dyn Future<Output = Result<HttpResponse, openidconnect::reqwest::Error<reqwest::Error>>>
-            + Send
-            + 'a,
-    >,
-> {
-    move |request: HttpRequest| {
-        Box::pin(async move {
-            let mut request_builder = client
-                .request(request.method, request.url.as_str())
-                .body(request.body);
-            for (name, value) in &request.headers {
-                request_builder = request_builder.header(name.as_str(), value.as_bytes());
-            }
-            let request = request_builder
-                .build()
-                .map_err(openidconnect::reqwest::Error::Reqwest)?;
-
-            let response = client
-                .execute(request)
-                .await
-                .map_err(openidconnect::reqwest::Error::Reqwest)?;
-
-            let status_code = response.status();
-            let headers = response.headers().to_owned();
-            let chunks = response
-                .bytes()
-                .await
-                .map_err(openidconnect::reqwest::Error::Reqwest)?;
-            Ok(HttpResponse {
-                status_code,
-                headers,
-                body: chunks.to_vec(),
-            })
-        })
     }
 }

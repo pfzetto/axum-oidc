@@ -16,11 +16,13 @@ pub enum ExtractorError {
 
     #[error("could not build rp initiated logout uri")]
     FailedToCreateRpInitiatedLogoutUri,
-
 }
 
 #[derive(Debug, Error)]
 pub enum MiddlewareError {
+    #[error("configuration: {0:?}")]
+    Configuration(#[from] openidconnect::ConfigurationError),
+
     #[error("access token hash invalid")]
     AccessTokenHashInvalid,
 
@@ -32,6 +34,9 @@ pub enum MiddlewareError {
 
     #[error("signing: {0:?}")]
     Signing(#[from] openidconnect::SigningError),
+
+    #[error("signature verification: {0:?}")]
+    Signature(#[from] openidconnect::SignatureVerificationError),
 
     #[error("claims verification: {0:?}")]
     ClaimsVerification(#[from] openidconnect::ClaimsVerificationError),
@@ -49,7 +54,7 @@ pub enum MiddlewareError {
     RequestToken(
         #[from]
         openidconnect::RequestTokenError<
-            openidconnect::reqwest::Error<reqwest::Error>,
+            openidconnect::HttpClientError<openidconnect::reqwest::Error>,
             StandardErrorResponse<CoreErrorResponseType>,
         >,
     ),
@@ -76,7 +81,12 @@ pub enum Error {
     InvalidEndSessionEndpoint(http::uri::InvalidUri),
 
     #[error("discovery: {0:?}")]
-    Discovery(#[from] openidconnect::DiscoveryError<openidconnect::reqwest::Error<reqwest::Error>>),
+    Discovery(
+        #[from]
+        openidconnect::DiscoveryError<
+            openidconnect::HttpClientError<openidconnect::reqwest::Error>,
+        >,
+    ),
 
     #[error("extractor: {0:?}")]
     Extractor(#[from] ExtractorError),
