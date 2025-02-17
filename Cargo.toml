@@ -15,6 +15,7 @@ keywords = [ "axum", "oidc", "openidconnect", "authentication" ]
 thiserror = "2.0"
 axum-core = "0.5"
 axum = { version = "0.8", default-features = false, features = [ "query" ] }
+bon = "3.3"
 tower-service = "0.3"
 tower-layer = "0.3"
 tower-sessions = { version = "0.14", default-features = false, features = [ "axum-core" ] }
