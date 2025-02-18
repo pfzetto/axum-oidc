@@ -112,8 +112,8 @@ impl AsRef<str> for OidcAccessToken {
 #[derive(Clone)]
 pub struct OidcRpInitiatedLogout {
     pub(crate) end_session_endpoint: Uri,
-    pub(crate) id_token_hint: String,
-    pub(crate) client_id: String,
+    pub(crate) id_token_hint: Box<str>,
+    pub(crate) client_id: Box<str>,
     pub(crate) post_logout_redirect_uri: Option<Uri>,
     pub(crate) state: Option<String>,
 }

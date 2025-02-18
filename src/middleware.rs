@@ -16,14 +16,15 @@ use tower_sessions::Session;
 
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
-    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, IdTokenClaims, IdTokenVerifier,
-    Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
+    AccessToken, AccessTokenHash, AuthenticationContextClass, AuthorizationCode, CsrfToken,
+    IdTokenClaims, IdTokenVerifier, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
+    PkceCodeVerifier, RedirectUrl, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse,
 };
 
 use crate::{
-    error::{Error, MiddlewareError},
+    error::MiddlewareError,
     extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout},
     AdditionalClaims, AuthenticatedSession, BoxError, ClearSessionFlag, IdToken, OidcClient,
     OidcQuery, OidcSession, SESSION_KEY,
@@ -126,8 +127,11 @@ where
                     .await
                     .map_err(MiddlewareError::from)?;
 
-                let handler_uri =
-                    strip_oidc_from_path(oidcclient.application_base_url.clone(), &parts.uri)?;
+                let handler_uri = strip_oidc_from_path(
+                    oidcclient.application_base_url.clone(),
+                    &parts.uri,
+                    &oidcclient.oidc_request_parameters,
+                )?;
 
                 oidcclient.client = oidcclient
                     .client
@@ -192,6 +196,12 @@ where
                             auth = auth.add_scope(Scope::new(scope.to_string()));
                         }
 
+                        if let Some(acr) = oidcclient.auth_context_class {
+                            auth = auth.add_auth_context_value(AuthenticationContextClass::new(
+                                acr.into(),
+                            ));
+                        }
+
                         auth.set_pkce_challenge(pkce_challenge).url()
                     };
 
@@ -225,24 +235,10 @@ impl<AC: AdditionalClaims> OidcAuthLayer<AC> {
     pub fn new(client: OidcClient<AC>) -> Self {
         Self { client }
     }
-
-    pub async fn discover_client(
-        application_base_url: Uri,
-        issuer: String,
-        client_id: String,
-        client_secret: Option<String>,
-        scopes: Vec<String>,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            client: OidcClient::<AC>::discover_new(
-                application_base_url,
-                issuer,
-                client_id,
-                client_secret,
-                scopes,
-            )
-            .await?,
-        })
+}
+impl<AC: AdditionalClaims> From<OidcClient<AC>> for OidcAuthLayer<AC> {
+    fn from(value: OidcClient<AC>) -> Self {
+        Self::new(value)
     }
 }
 
@@ -309,8 +305,11 @@ where
                 .await
                 .map_err(MiddlewareError::from)?;
 
-            let handler_uri =
-                strip_oidc_from_path(oidcclient.application_base_url.clone(), &parts.uri)?;
+            let handler_uri = strip_oidc_from_path(
+                oidcclient.application_base_url.clone(),
+                &parts.uri,
+                &oidcclient.oidc_request_parameters,
+            )?;
 
             oidcclient.client = oidcclient
                 .client
@@ -373,7 +372,11 @@ where
 
 /// Helper function to remove the OpenID Connect authentication response query attributes from a
 /// [`Uri`].
-pub fn strip_oidc_from_path(base_url: Uri, uri: &Uri) -> Result<Uri, MiddlewareError> {
+pub fn strip_oidc_from_path(
+    base_url: Uri,
+    uri: &Uri,
+    filter: &[Box<str>],
+) -> Result<Uri, MiddlewareError> {
     let mut base_url = base_url.into_parts();
 
     base_url.path_and_query = uri
@@ -381,20 +384,20 @@ pub fn strip_oidc_from_path(base_url: Uri, uri: &Uri) -> Result<Uri, MiddlewareE
         .map(|path_and_query| {
             let query = path_and_query
                 .query()
-                .and_then(|uri| {
+                .map(|uri| {
                     uri.split('&')
-                        .filter(|x| {
-                            !x.starts_with("code")
-                                && !x.starts_with("state")
-                                && !x.starts_with("session_state")
-                                && !x.starts_with("iss")
+                        .filter(|x| filter.iter().all(|y| !x.starts_with(y.as_ref())))
+                        .fold(String::default(), |mut acc, x| {
+                            if !acc.is_empty() {
+                                acc += "&";
+                            } else {
+                                acc += "?";
+                            }
+                            acc += x;
+                            acc
                         })
-                        .map(|x| x.to_string())
-                        .reduce(|acc, x| acc + "&" + &x)
                 })
-                .map(|x| format!("?{x}"))
                 .unwrap_or_default();
-
             PathAndQuery::from_maybe_shared(format!("{}{}", path_and_query.path(), query))
         })
         .transpose()?;
@@ -418,7 +421,7 @@ fn insert_extensions<AC: AdditionalClaims>(
         .as_ref()
         .map(|end_session_endpoint| OidcRpInitiatedLogout {
             end_session_endpoint: end_session_endpoint.clone(),
-            id_token_hint: authenticated_session.id_token.to_string(),
+            id_token_hint: authenticated_session.id_token.to_string().into(),
             client_id: client.client_id.clone(),
             post_logout_redirect_uri: None,
             state: None,

@@ -2,8 +2,8 @@ use axum::{
     error_handling::HandleErrorLayer, http::Uri, response::IntoResponse, routing::get, Router,
 };
 use axum_oidc::{
-    error::MiddlewareError, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcLoginLayer,
-    OidcRpInitiatedLogout,
+    error::MiddlewareError, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcClient,
+    OidcLoginLayer, OidcRpInitiatedLogout,
 };
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -26,25 +26,30 @@ pub async fn run(
 
     let oidc_login_service = ServiceBuilder::new()
         .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
+            dbg!(&e);
             e.into_response()
         }))
         .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new());
 
+    let mut oidc_client = OidcClient::<EmptyAdditionalClaims>::builder()
+        .with_default_http_client()
+        .with_application_base_url(Uri::from_maybe_shared(app_url).expect("valid APP_URL"))
+        .with_client_id(client_id);
+    if let Some(client_secret) = client_secret {
+        oidc_client = oidc_client.with_client_secret(client_secret);
+    }
+    let oidc_client = oidc_client
+        .discover(Uri::from_maybe_shared(issuer).expect("valid issuer URI"))
+        .await
+        .unwrap()
+        .build();
+
     let oidc_auth_service = ServiceBuilder::new()
         .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
+            dbg!(&e);
             e.into_response()
         }))
-        .layer(
-            OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-                Uri::from_maybe_shared(app_url).expect("valid APP_URL"),
-                issuer,
-                client_id,
-                client_secret,
-                vec![],
-            )
-            .await
-            .unwrap(),
-        );
+        .layer(OidcAuthLayer::new(oidc_client));
 
     let app = Router::new()
         .route("/foo", get(authenticated))
@@ -79,5 +84,5 @@ async fn maybe_authenticated(
 }
 
 async fn logout(logout: OidcRpInitiatedLogout) -> impl IntoResponse {
-    logout.with_post_logout_redirect(Uri::from_static("https://pfzetto.de"))
+    logout.with_post_logout_redirect(Uri::from_static("https://example.com"))
 }
