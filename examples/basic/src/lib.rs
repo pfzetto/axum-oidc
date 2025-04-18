@@ -16,12 +16,7 @@ use tower_sessions::{
     Expiry, MemoryStore, SessionManagerLayer,
 };
 
-pub async fn run(
-    app_url: String,
-    issuer: String,
-    client_id: String,
-    client_secret: Option<String>,
-) {
+pub async fn run(issuer: String, client_id: String, client_secret: Option<String>) {
     let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(false)

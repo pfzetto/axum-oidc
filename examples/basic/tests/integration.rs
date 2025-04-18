@@ -31,9 +31,8 @@ async fn first() {
 
     info!("starting basic example app");
 
-    let app_url = "http://127.0.0.1:8080/";
+    let app_url = "http://localhost:8080/";
     let app_handle = tokio::spawn(basic::run(
-        app_url.to_string(),
         format!("{}/realms/test", keycloak.url()),
         basic_client.client_id.to_string(),
         basic_client.client_secret.clone(),
