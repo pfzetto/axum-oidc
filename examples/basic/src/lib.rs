@@ -42,11 +42,7 @@ pub async fn run(
     if let Some(client_secret) = client_secret {
         oidc_client = oidc_client.with_client_secret(client_secret);
     }
-    let oidc_client = oidc_client
-        .discover(Uri::from_maybe_shared(issuer).expect("valid issuer URI"))
-        .await
-        .unwrap()
-        .build();
+    let oidc_client = oidc_client.discover(issuer).await.unwrap().build();
 
     let oidc_auth_service = ServiceBuilder::new()
         .layer(HandleErrorLayer::new(|e: MiddlewareError| async {

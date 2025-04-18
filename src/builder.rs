@@ -195,12 +195,12 @@ impl<AC: AdditionalClaims> Builder<AC, ClientCredentials, (), HttpClient, Redire
     /// discover issuer details
     pub async fn discover(
         self,
-        issuer: impl Into<Uri>,
+        issuer: String,
     ) -> Result<
         Builder<AC, ClientCredentials, OpenidconnectClient<AC>, HttpClient, RedirectUrl>,
         Error,
     > {
-        let issuer_url = IssuerUrl::new(issuer.into().to_string())?;
+        let issuer_url = IssuerUrl::new(issuer)?;
         let http_client = self.http_client.0.clone();
         let provider_metadata = ProviderMetadata::discover_async(issuer_url, &http_client);
 
