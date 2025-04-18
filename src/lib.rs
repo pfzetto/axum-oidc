@@ -21,9 +21,11 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub mod builder;
 pub mod error;
 mod extractor;
+mod handler;
 mod middleware;
 
 pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout};
+pub use handler::handle_oidc_redirect;
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
 
 const SESSION_KEY: &str = "axum-oidc";
@@ -100,11 +102,9 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Clone)]
 pub struct OidcClient<AC: AdditionalClaims> {
     scopes: Vec<Box<str>>,
-    oidc_request_parameters: Vec<Box<str>>,
     client_id: Box<str>,
     client: Client<AC>,
     http_client: reqwest::Client,
-    application_base_url: Uri,
     end_session_endpoint: Option<Uri>,
     auth_context_class: Option<Box<str>>,
 }
@@ -115,15 +115,6 @@ pub struct EmptyAdditionalClaims {}
 impl AdditionalClaims for EmptyAdditionalClaims {}
 impl openidconnect::AdditionalClaims for EmptyAdditionalClaims {}
 
-/// response data of the openid issuer after login
-#[derive(Debug, Deserialize)]
-struct OidcQuery {
-    code: String,
-    state: String,
-    #[allow(dead_code)]
-    session_state: Option<String>,
-}
-
 /// oidc session
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(bound = "AC: Serialize + DeserializeOwned")]
@@ -133,6 +124,7 @@ struct OidcSession<AC: AdditionalClaims> {
     pkce_verifier: PkceCodeVerifier,
     authenticated: Option<AuthenticatedSession<AC>>,
     refresh_token: Option<RefreshToken>,
+    redirect_url: Box<str>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

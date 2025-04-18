@@ -73,6 +73,45 @@ pub enum MiddlewareError {
 }
 
 #[derive(Debug, Error)]
+pub enum HandlerError {
+    #[error("the redirect handler got accessed without a valid session")]
+    RedirectedWithoutSession,
+
+    #[error("csrf token invalid")]
+    CsrfTokenInvalid,
+
+    #[error("id token missing")]
+    IdTokenMissing,
+
+    #[error("access token hash invalid")]
+    AccessTokenHashInvalid,
+
+    #[error("signing: {0:?}")]
+    Signing(#[from] openidconnect::SigningError),
+
+    #[error("signature verification: {0:?}")]
+    Signature(#[from] openidconnect::SignatureVerificationError),
+
+    #[error("session error: {0:?}")]
+    Session(#[from] tower_sessions::session::Error),
+
+    #[error("configuration: {0:?}")]
+    Configuration(#[from] openidconnect::ConfigurationError),
+
+    #[error("request token: {0:?}")]
+    RequestToken(
+        #[from]
+        openidconnect::RequestTokenError<
+            openidconnect::HttpClientError<openidconnect::reqwest::Error>,
+            StandardErrorResponse<CoreErrorResponseType>,
+        >,
+    ),
+
+    #[error("claims verification: {0:?}")]
+    ClaimsVerification(#[from] openidconnect::ClaimsVerificationError),
+}
+
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("url parsing: {0:?}")]
     UrlParsing(#[from] openidconnect::url::ParseError),
@@ -93,6 +132,9 @@ pub enum Error {
 
     #[error("extractor: {0:?}")]
     Middleware(#[from] MiddlewareError),
+
+    #[error("handler: {0:?}")]
+    Handler(#[from] HandlerError),
 }
 
 impl IntoResponse for ExtractorError {
@@ -118,6 +160,14 @@ impl IntoResponse for Error {
 }
 
 impl IntoResponse for MiddlewareError {
+    fn into_response(self) -> axum_core::response::Response {
+        match self {
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response(),
+        }
+    }
+}
+
+impl IntoResponse for HandlerError {
     fn into_response(self) -> axum_core::response::Response {
         match self {
             _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response(),

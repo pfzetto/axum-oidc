@@ -1,9 +1,13 @@
 use axum::{
-    error_handling::HandleErrorLayer, http::Uri, response::IntoResponse, routing::get, Router,
+    error_handling::HandleErrorLayer,
+    http::Uri,
+    response::IntoResponse,
+    routing::{any, get},
+    Router,
 };
 use axum_oidc::{
-    error::MiddlewareError, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcClient,
-    OidcLoginLayer, OidcRpInitiatedLogout,
+    error::MiddlewareError, handle_oidc_redirect, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims,
+    OidcClient, OidcLoginLayer, OidcRpInitiatedLogout,
 };
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -33,7 +37,7 @@ pub async fn run(
 
     let mut oidc_client = OidcClient::<EmptyAdditionalClaims>::builder()
         .with_default_http_client()
-        .with_application_base_url(Uri::from_maybe_shared(app_url).expect("valid APP_URL"))
+        .with_redirect_url(Uri::from_static("http://localhost:8080/oidc"))
         .with_client_id(client_id);
     if let Some(client_secret) = client_secret {
         oidc_client = oidc_client.with_client_secret(client_secret);
@@ -56,6 +60,7 @@ pub async fn run(
         .route("/logout", get(logout))
         .layer(oidc_login_service)
         .route("/bar", get(maybe_authenticated))
+        .route("/oidc", any(handle_oidc_redirect::<EmptyAdditionalClaims>))
         .layer(oidc_auth_service)
         .layer(session_layer);
 

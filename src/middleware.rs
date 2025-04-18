@@ -3,22 +3,18 @@ use std::{
     task::{Context, Poll},
 };
 
-use axum::{
-    extract::Query,
-    response::{IntoResponse, Redirect},
-};
-use axum_core::{extract::FromRequestParts, response::Response};
+use axum::response::{IntoResponse, Redirect};
+use axum_core::response::Response;
 use futures_util::future::BoxFuture;
-use http::{request::Parts, uri::PathAndQuery, Request, Uri};
+use http::{request::Parts, Request};
 use tower_layer::Layer;
 use tower_service::Service;
 use tower_sessions::Session;
 
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
-    AccessToken, AccessTokenHash, AuthenticationContextClass, AuthorizationCode, CsrfToken,
-    IdTokenClaims, IdTokenVerifier, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
-    PkceCodeVerifier, RedirectUrl, RefreshToken,
+    AccessToken, AccessTokenHash, AuthenticationContextClass, CsrfToken, IdTokenClaims,
+    IdTokenVerifier, Nonce, OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse,
 };
@@ -27,7 +23,7 @@ use crate::{
     error::MiddlewareError,
     extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout},
     AdditionalClaims, AuthenticatedSession, BoxError, ClearSessionFlag, IdToken, OidcClient,
-    OidcQuery, OidcSession, SESSION_KEY,
+    OidcSession, SESSION_KEY,
 };
 
 /// Layer for the [`OidcLoginMiddleware`].
@@ -106,117 +102,53 @@ where
         } else {
             // no valid id token or refresh token was found and the user has to login
             Box::pin(async move {
-                let (mut parts, _) = request.into_parts();
+                let (parts, _) = request.into_parts();
 
-                let mut oidcclient: OidcClient<AC> = parts
+                let oidcclient: OidcClient<AC> = parts
                     .extensions
                     .get()
                     .cloned()
                     .ok_or(MiddlewareError::AuthMiddlewareNotFound)?;
 
-                let query = Query::<OidcQuery>::from_request_parts(&mut parts, &())
-                    .await
-                    .ok();
-
                 let session = parts
                     .extensions
                     .get::<Session>()
                     .ok_or(MiddlewareError::SessionNotFound)?;
-                let login_session: Option<OidcSession<AC>> = session
-                    .get(SESSION_KEY)
-                    .await
-                    .map_err(MiddlewareError::from)?;
 
-                let handler_uri = strip_oidc_from_path(
-                    oidcclient.application_base_url.clone(),
-                    &parts.uri,
-                    &oidcclient.oidc_request_parameters,
-                )?;
+                // generate a login url and redirect the user to it
 
-                oidcclient.client = oidcclient
-                    .client
-                    .set_redirect_uri(RedirectUrl::new(handler_uri.to_string())?);
+                let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+                let (auth_url, csrf_token, nonce) = {
+                    let mut auth = oidcclient.client.authorize_url(
+                        CoreAuthenticationFlow::AuthorizationCode,
+                        CsrfToken::new_random,
+                        Nonce::new_random,
+                    );
 
-                if let (Some(mut login_session), Some(query)) = (login_session, query) {
-                    // the request has the request headers of the oidc redirect
-                    // parse the headers and exchange the code for a valid token
-
-                    if login_session.csrf_token.secret() != &query.state {
-                        return Err(MiddlewareError::CsrfTokenInvalid);
+                    for scope in oidcclient.scopes.iter() {
+                        auth = auth.add_scope(Scope::new(scope.to_string()));
                     }
 
-                    let token_response = oidcclient
-                        .client
-                        .exchange_code(AuthorizationCode::new(query.code.to_string()))?
-                        // Set the PKCE code verifier.
-                        .set_pkce_verifier(PkceCodeVerifier::new(
-                            login_session.pkce_verifier.secret().to_string(),
-                        ))
-                        .request_async(&oidcclient.http_client)
-                        .await?;
-
-                    // Extract the ID token claims after verifying its authenticity and nonce.
-                    let id_token = token_response
-                        .id_token()
-                        .ok_or(MiddlewareError::IdTokenMissing)?;
-                    let id_token_verifier = oidcclient.client.id_token_verifier();
-                    let claims = id_token.claims(&id_token_verifier, &login_session.nonce)?;
-
-                    validate_access_token_hash(
-                        id_token,
-                        id_token_verifier,
-                        token_response.access_token(),
-                        claims,
-                    )?;
-
-                    login_session.authenticated = Some(AuthenticatedSession {
-                        id_token: id_token.clone(),
-                        access_token: token_response.access_token().clone(),
-                    });
-                    let refresh_token = token_response.refresh_token().cloned();
-                    if let Some(refresh_token) = refresh_token {
-                        login_session.refresh_token = Some(refresh_token);
+                    if let Some(acr) = oidcclient.auth_context_class {
+                        auth = auth
+                            .add_auth_context_value(AuthenticationContextClass::new(acr.into()));
                     }
 
-                    session.insert(SESSION_KEY, login_session).await?;
+                    auth.set_pkce_challenge(pkce_challenge).url()
+                };
 
-                    Ok(Redirect::temporary(&handler_uri.to_string()).into_response())
-                } else {
-                    // generate a login url and redirect the user to it
+                let oidc_session = OidcSession::<AC> {
+                    nonce,
+                    csrf_token,
+                    pkce_verifier,
+                    authenticated: None,
+                    refresh_token: None,
+                    redirect_url: parts.uri.to_string().into(),
+                };
 
-                    let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-                    let (auth_url, csrf_token, nonce) = {
-                        let mut auth = oidcclient.client.authorize_url(
-                            CoreAuthenticationFlow::AuthorizationCode,
-                            CsrfToken::new_random,
-                            Nonce::new_random,
-                        );
+                session.insert(SESSION_KEY, oidc_session).await?;
 
-                        for scope in oidcclient.scopes.iter() {
-                            auth = auth.add_scope(Scope::new(scope.to_string()));
-                        }
-
-                        if let Some(acr) = oidcclient.auth_context_class {
-                            auth = auth.add_auth_context_value(AuthenticationContextClass::new(
-                                acr.into(),
-                            ));
-                        }
-
-                        auth.set_pkce_challenge(pkce_challenge).url()
-                    };
-
-                    let oidc_session = OidcSession::<AC> {
-                        nonce,
-                        csrf_token,
-                        pkce_verifier,
-                        authenticated: None,
-                        refresh_token: None,
-                    };
-
-                    session.insert(SESSION_KEY, oidc_session).await?;
-
-                    Ok(Redirect::temporary(auth_url.as_str()).into_response())
-                }
+                Ok(Redirect::to(auth_url.as_str()).into_response())
             })
         }
     }
@@ -291,7 +223,7 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
-        let mut oidcclient = self.client.clone();
+        let oidcclient = self.client.clone();
         Box::pin(async move {
             let (mut parts, body) = request.into_parts();
 
@@ -304,16 +236,6 @@ where
                 .get(SESSION_KEY)
                 .await
                 .map_err(MiddlewareError::from)?;
-
-            let handler_uri = strip_oidc_from_path(
-                oidcclient.application_base_url.clone(),
-                &parts.uri,
-                &oidcclient.oidc_request_parameters,
-            )?;
-
-            oidcclient.client = oidcclient
-                .client
-                .set_redirect_uri(RedirectUrl::new(handler_uri.to_string())?);
 
             if let Some(login_session) = &mut login_session {
                 let id_token_claims = login_session.authenticated.as_ref().and_then(|session| {
@@ -329,6 +251,7 @@ where
                     // stored id token is valid and can be used
                     insert_extensions(&mut parts, claims.clone(), &oidcclient, session);
                 } else if let Some(refresh_token) = login_session.refresh_token.as_ref() {
+                    // session is expired but can be refreshed using the refresh_token
                     if let Some((claims, authenticated_session, refresh_token)) =
                         try_refresh_token(&oidcclient, refresh_token, &login_session.nonce).await?
                     {
@@ -368,41 +291,6 @@ where
             Ok(response)
         })
     }
-}
-
-/// Helper function to remove the OpenID Connect authentication response query attributes from a
-/// [`Uri`].
-pub fn strip_oidc_from_path(
-    base_url: Uri,
-    uri: &Uri,
-    filter: &[Box<str>],
-) -> Result<Uri, MiddlewareError> {
-    let mut base_url = base_url.into_parts();
-
-    base_url.path_and_query = uri
-        .path_and_query()
-        .map(|path_and_query| {
-            let query = path_and_query
-                .query()
-                .map(|uri| {
-                    uri.split('&')
-                        .filter(|x| filter.iter().all(|y| !x.starts_with(y.as_ref())))
-                        .fold(String::default(), |mut acc, x| {
-                            if !acc.is_empty() {
-                                acc += "&";
-                            } else {
-                                acc += "?";
-                            }
-                            acc += x;
-                            acc
-                        })
-                })
-                .unwrap_or_default();
-            PathAndQuery::from_maybe_shared(format!("{}{}", path_and_query.path(), query))
-        })
-        .transpose()?;
-
-    Ok(Uri::from_parts(base_url)?)
 }
 
 /// insert all extensions that are used by the extractors
