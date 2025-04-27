@@ -27,6 +27,8 @@ mod middleware;
 pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout};
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
 
+pub use openidconnect;
+
 const SESSION_KEY: &str = "axum-oidc";
 
 pub trait AdditionalClaims:

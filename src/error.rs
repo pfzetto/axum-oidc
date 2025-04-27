@@ -102,17 +102,13 @@ impl IntoResponse for ExtractorError {
 impl IntoResponse for Error {
     fn into_response(self) -> axum_core::response::Response {
         dbg!(&self);
-        match self {
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response(),
-        }
+        (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
     }
 }
 
 impl IntoResponse for MiddlewareError {
     fn into_response(self) -> axum_core::response::Response {
         dbg!(&self);
-        match self {
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response(),
-        }
+        (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
     }
 }

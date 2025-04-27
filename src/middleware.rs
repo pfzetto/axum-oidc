@@ -495,18 +495,18 @@ async fn try_refresh_token<AC: AdditionalClaims>(
     }
 }
 
-/// `openidconnect::reqwest::async_http_client` that uses a custom `reqwest::client`
-fn async_http_client<'a>(
-    client: &'a reqwest::Client,
-) -> impl FnOnce(
-    HttpRequest,
-) -> Pin<
+type AsyncHttpClient<'a> = Pin<
     Box<
         dyn Future<Output = Result<HttpResponse, openidconnect::reqwest::Error<reqwest::Error>>>
             + Send
             + 'a,
     >,
-> {
+>;
+
+/// `openidconnect::reqwest::async_http_client` that uses a custom `reqwest::client`
+fn async_http_client<'a>(
+    client: &'a reqwest::Client,
+) -> impl FnOnce(HttpRequest) -> AsyncHttpClient<'a> {
     move |request: HttpRequest| {
         Box::pin(async move {
             let mut request_builder = client
