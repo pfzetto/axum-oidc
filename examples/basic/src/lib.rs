@@ -6,15 +6,25 @@ use axum::{
     Router,
 };
 use axum_oidc::{
-    error::MiddlewareError, handle_oidc_redirect, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims,
-    OidcClient, OidcLoginLayer, OidcRpInitiatedLogout,
+    error::MiddlewareError, handle_oidc_redirect, AdditionalClaims, Audience, Config,
+    OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer, OidcRpInitiatedLogout, OidcUserClaims,
 };
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_sessions::{
     cookie::{time::Duration, SameSite},
     Expiry, MemoryStore, SessionManagerLayer,
 };
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+//struct MyAdditionalClaims(HashMap<String, serde_json::Value>);
+struct MyAdditionalClaims {
+    admin: Option<bool>,
+}
+
+impl AdditionalClaims for MyAdditionalClaims {}
+impl openidconnect::AdditionalClaims for MyAdditionalClaims {}
 
 pub async fn run(issuer: String, client_id: String, client_secret: Option<String>) {
     let session_store = MemoryStore::default();
@@ -28,30 +38,42 @@ pub async fn run(issuer: String, client_id: String, client_secret: Option<String
             dbg!(&e);
             e.into_response()
         }))
-        .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new());
+        .layer(OidcLoginLayer::<MyAdditionalClaims>::new());
 
-    let mut oidc_client = OidcClient::<EmptyAdditionalClaims>::builder()
+    let mut oidc_client = OidcClient::<MyAdditionalClaims>::builder()
         .with_default_http_client()
-        .with_redirect_url(Uri::from_static("http://localhost:8080/oidc"))
-        .with_client_id(client_id);
+        .with_redirect_url(Uri::from_static("http://127.0.0.1:8080/oidc"))
+        .with_client_id(client_id)
+        .add_scope("profile")
+        .add_scope("email")
+        .add_scope("urn:zitadel:iam:org:project:id:zitadel:aud");
     if let Some(client_secret) = client_secret {
         oidc_client = oidc_client.with_client_secret(client_secret);
     }
     let oidc_client = oidc_client.discover(issuer).await.unwrap().build();
+
+    let config = Config {
+        other_audiences: vec![
+            Audience::new("318246545105453932".to_string()),
+            Audience::new("318244871846527852".to_string()),
+            Audience::new("317981086246456313".to_string()),
+        ],
+    };
 
     let oidc_auth_service = ServiceBuilder::new()
         .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
             dbg!(&e);
             e.into_response()
         }))
-        .layer(OidcAuthLayer::new(oidc_client));
+        .layer(OidcAuthLayer::new(oidc_client, config.clone()));
 
     let app = Router::new()
         .route("/foo", get(authenticated))
         .route("/logout", get(logout))
         .layer(oidc_login_service)
         .route("/bar", get(maybe_authenticated))
-        .route("/oidc", any(handle_oidc_redirect::<EmptyAdditionalClaims>))
+        .route("/oidc", any(handle_oidc_redirect::<MyAdditionalClaims>))
+        .with_state(config)
         .layer(oidc_auth_service)
         .layer(session_layer);
 
@@ -61,24 +83,25 @@ pub async fn run(issuer: String, client_id: String, client_secret: Option<String
         .unwrap();
 }
 
-async fn authenticated(claims: OidcClaims<EmptyAdditionalClaims>) -> impl IntoResponse {
+async fn authenticated(claims: OidcClaims<MyAdditionalClaims>) -> impl IntoResponse {
     format!("Hello {}", claims.subject().as_str())
 }
 
 #[axum::debug_handler]
 async fn maybe_authenticated(
-    claims: Result<OidcClaims<EmptyAdditionalClaims>, axum_oidc::error::ExtractorError>,
+    claims: Result<OidcUserClaims<MyAdditionalClaims>, axum_oidc::error::ExtractorError>,
 ) -> impl IntoResponse {
     if let Ok(claims) = claims {
+        dbg!(&claims);
         format!(
-            "Hello {}! You are already logged in from another Handler.",
-            claims.subject().as_str()
+            "Hello {:#?}! You are already logged in from another Handler.",
+            claims.name().unwrap().get(None).unwrap().as_str()
         )
     } else {
-        "Hello anon!".to_string()
+        "Hello unauthenticated user!".to_string()
     }
 }
 
 async fn logout(logout: OidcRpInitiatedLogout) -> impl IntoResponse {
-    logout.with_post_logout_redirect(Uri::from_static("https://example.com"))
+    logout.with_post_logout_redirect(Uri::from_static("http://127.0.0.1:8080/bar"))
 }
