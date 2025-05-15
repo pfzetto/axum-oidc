@@ -24,9 +24,10 @@ mod extractor;
 mod handler;
 mod middleware;
 
-pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout};
+pub use extractor::{OidcAccessToken, OidcClaims, OidcUserClaims, OidcRpInitiatedLogout};
 pub use handler::handle_oidc_redirect;
-pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
+pub use middleware::{Config, OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
+pub use openidconnect::Audience;
 
 const SESSION_KEY: &str = "axum-oidc";
 

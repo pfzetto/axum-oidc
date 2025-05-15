@@ -7,12 +7,12 @@ use axum_core::{
     response::IntoResponse,
 };
 use http::{request::Parts, uri::PathAndQuery, Uri};
-use openidconnect::{core::CoreGenderClaim, IdTokenClaims};
+use openidconnect::{core::CoreGenderClaim, IdTokenClaims, UserInfoClaims};
 
 /// Extractor for the OpenID Connect Claims.
 ///
 /// This Extractor will only return the Claims when the cached session is valid and [`crate::middleware::OidcAuthMiddleware`] is loaded.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OidcClaims<AC: AdditionalClaims>(pub IdTokenClaims<AC, CoreGenderClaim>);
 
 impl<S, AC> FromRequestParts<S> for OidcClaims<AC>
@@ -211,5 +211,57 @@ impl IntoResponse for OidcRpInitiatedLogout {
         } else {
             ExtractorError::FailedToCreateRpInitiatedLogoutUri.into_response()
         }
+    }
+}
+
+
+/// Extractor for the OpenID Connect User Info Claims.
+///
+/// This Extractor will only return the User Info Claims when the cached session is valid and [`crate::middleware::OidcAuthMiddleware`] is loaded.
+#[derive(Clone, Debug)]
+pub struct OidcUserClaims<AC: AdditionalClaims>(pub UserInfoClaims<AC, CoreGenderClaim>);
+
+impl<S, AC> FromRequestParts<S> for OidcUserClaims<AC>
+where
+    S: Send + Sync,
+    AC: AdditionalClaims,
+{
+    type Rejection = ExtractorError;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<Self>()
+            .cloned()
+            .ok_or(ExtractorError::Unauthorized)
+    }
+}
+
+impl<S, AC> OptionalFromRequestParts<S> for OidcUserClaims<AC>
+where
+    S: Send + Sync,
+    AC: AdditionalClaims,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Option<Self>, Self::Rejection> {
+        Ok(parts.extensions.get::<Self>().cloned())
+    }
+}
+
+impl<AC: AdditionalClaims> Deref for OidcUserClaims<AC> {
+    type Target = UserInfoClaims<AC, CoreGenderClaim>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<AC> AsRef<UserInfoClaims<AC, CoreGenderClaim>> for OidcUserClaims<AC>
+where
+    AC: AdditionalClaims,
+{
+    fn as_ref(&self) -> &UserInfoClaims<AC, CoreGenderClaim> {
+        &self.0
     }
 }

@@ -13,18 +13,23 @@ use tower_sessions::Session;
 
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
-    AccessToken, AccessTokenHash, AuthenticationContextClass, CsrfToken, IdTokenClaims,
+    AccessToken, AccessTokenHash, Audience, AuthenticationContextClass, CsrfToken, IdTokenClaims,
     IdTokenVerifier, Nonce, OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
-    Scope, TokenResponse,
+    Scope, TokenResponse, UserInfoClaims,
 };
 
 use crate::{
     error::MiddlewareError,
-    extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout},
+    extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout, OidcUserClaims},
     AdditionalClaims, AuthenticatedSession, BoxError, ClearSessionFlag, IdToken, OidcClient,
     OidcSession, SESSION_KEY,
 };
+
+#[derive(Clone, Default, Debug)]
+pub struct Config {
+    pub other_audiences: Vec<Audience>,
+}
 
 /// Layer for the [`OidcLoginMiddleware`].
 #[derive(Clone, Default)]
@@ -161,16 +166,17 @@ where
     AC: AdditionalClaims,
 {
     client: OidcClient<AC>,
+    config: Config,
 }
 
 impl<AC: AdditionalClaims> OidcAuthLayer<AC> {
-    pub fn new(client: OidcClient<AC>) -> Self {
-        Self { client }
+    pub fn new(client: OidcClient<AC>, config: Config) -> Self {
+        Self { client, config }
     }
 }
 impl<AC: AdditionalClaims> From<OidcClient<AC>> for OidcAuthLayer<AC> {
     fn from(value: OidcClient<AC>) -> Self {
-        Self::new(value)
+        Self::new(value, Config::default())
     }
 }
 
@@ -184,6 +190,7 @@ where
         OidcAuthMiddleware {
             inner,
             client: self.client.clone(),
+            config: self.config.clone(),
         }
     }
 }
@@ -199,6 +206,7 @@ where
 {
     inner: I,
     client: OidcClient<AC>,
+    config: Config,
 }
 
 impl<I, AC, B> Service<Request<B>> for OidcAuthMiddleware<I, AC>
@@ -223,7 +231,9 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
+        let other_audiences = self.config.other_audiences.clone();
         let oidcclient = self.client.clone();
+
         Box::pin(async move {
             let (mut parts, body) = request.into_parts();
 
@@ -241,21 +251,43 @@ where
                 let id_token_claims = login_session.authenticated.as_ref().and_then(|session| {
                     session
                         .id_token
-                        .claims(&oidcclient.client.id_token_verifier(), &login_session.nonce)
+                        .claims(
+                            &oidcclient
+                                .client
+                                .id_token_verifier()
+                                .set_other_audience_verifier_fn(|audience| {
+                                    other_audiences.contains(audience)
+                                }),
+                            &login_session.nonce,
+                        )
                         .ok()
                         .cloned()
                         .map(|claims| (session, claims))
                 });
 
                 if let Some((session, claims)) = id_token_claims {
+                    let user_claims =
+                        get_user_claims(&oidcclient, session.access_token.clone()).await?;
                     // stored id token is valid and can be used
-                    insert_extensions(&mut parts, claims.clone(), &oidcclient, session);
+                    insert_extensions(
+                        &mut parts,
+                        claims.clone(),
+                        user_claims,
+                        &oidcclient,
+                        session,
+                    );
                 } else if let Some(refresh_token) = login_session.refresh_token.as_ref() {
                     // session is expired but can be refreshed using the refresh_token
-                    if let Some((claims, authenticated_session, refresh_token)) =
+                    if let Some((claims, user_claims, authenticated_session, refresh_token)) =
                         try_refresh_token(&oidcclient, refresh_token, &login_session.nonce).await?
                     {
-                        insert_extensions(&mut parts, claims, &oidcclient, &authenticated_session);
+                        insert_extensions(
+                            &mut parts,
+                            claims,
+                            user_claims.clone(),
+                            &oidcclient,
+                            &authenticated_session,
+                        );
                         login_session.authenticated = Some(authenticated_session);
 
                         if let Some(refresh_token) = refresh_token {
@@ -297,10 +329,12 @@ where
 fn insert_extensions<AC: AdditionalClaims>(
     parts: &mut Parts,
     claims: IdTokenClaims<AC, CoreGenderClaim>,
+    user_claims: UserInfoClaims<AC, CoreGenderClaim>,
     client: &OidcClient<AC>,
     authenticated_session: &AuthenticatedSession<AC>,
 ) {
     parts.extensions.insert(OidcClaims(claims));
+    parts.extensions.insert(OidcUserClaims(user_claims));
     parts.extensions.insert(OidcAccessToken(
         authenticated_session.access_token.secret().to_string(),
     ));
@@ -342,6 +376,19 @@ fn validate_access_token_hash<AC: AdditionalClaims>(
     }
 }
 
+async fn get_user_claims<AC: AdditionalClaims>(
+    client: &OidcClient<AC>,
+    access_token: AccessToken,
+) -> Result<UserInfoClaims<AC, CoreGenderClaim>, MiddlewareError> {
+    client
+        .client
+        .user_info(access_token, None)
+        .map_err(MiddlewareError::Configuration)?
+        .request_async(&client.http_client)
+        .await
+        .map_err(|e| e.into())
+}
+
 async fn try_refresh_token<AC: AdditionalClaims>(
     client: &OidcClient<AC>,
     refresh_token: &RefreshToken,
@@ -349,6 +396,7 @@ async fn try_refresh_token<AC: AdditionalClaims>(
 ) -> Result<
     Option<(
         IdTokenClaims<AC, CoreGenderClaim>,
+        UserInfoClaims<AC, CoreGenderClaim>,
         AuthenticatedSession<AC>,
         Option<RefreshToken>,
     )>,
@@ -366,7 +414,10 @@ async fn try_refresh_token<AC: AdditionalClaims>(
             let id_token = token_response
                 .id_token()
                 .ok_or(MiddlewareError::IdTokenMissing)?;
-            let id_token_verifier = client.client.id_token_verifier();
+            let id_token_verifier = client
+                .client
+                .id_token_verifier()
+                .require_audience_match(false);
             let claims = id_token.claims(&id_token_verifier, nonce)?;
 
             validate_access_token_hash(
@@ -381,8 +432,12 @@ async fn try_refresh_token<AC: AdditionalClaims>(
                 access_token: token_response.access_token().clone(),
             };
 
+            let user_claims =
+                get_user_claims(client, authenticated_session.access_token.clone()).await?;
+
             Ok(Some((
                 claims.clone(),
+                user_claims,
                 authenticated_session,
                 token_response.refresh_token().cloned(),
             )))
