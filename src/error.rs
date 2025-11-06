@@ -70,6 +70,9 @@ pub enum MiddlewareError {
 
     #[error("auth middleware not found")]
     AuthMiddlewareNotFound,
+
+    #[error("original url not found")]
+    OriginalUrlNotFound,
 }
 
 #[derive(Debug, Error)]

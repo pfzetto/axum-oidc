@@ -3,7 +3,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use axum::response::{IntoResponse, Redirect};
+use axum::{
+    extract::OriginalUri,
+    response::{IntoResponse, Redirect},
+};
 use axum_core::response::Response;
 use futures_util::future::BoxFuture;
 use http::{request::Parts, Request};
@@ -115,6 +118,16 @@ where
                     .get::<Session>()
                     .ok_or(MiddlewareError::SessionNotFound)?;
 
+                let redirect_url = parts
+                    .extensions
+                    .get::<OriginalUri>()
+                    .ok_or(MiddlewareError::OriginalUrlNotFound)?;
+
+                let redirect_url = if let Some(query) = redirect_url.query() {
+                    redirect_url.path().to_string() + "?" + query
+                } else {
+                    redirect_url.path().to_string()
+                };
                 // generate a login url and redirect the user to it
 
                 let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -143,7 +156,7 @@ where
                     pkce_verifier,
                     authenticated: None,
                     refresh_token: None,
-                    redirect_url: parts.uri.to_string().into(),
+                    redirect_url: redirect_url.into(),
                 };
 
                 session.insert(SESSION_KEY, oidc_session).await?;
