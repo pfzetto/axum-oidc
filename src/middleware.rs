@@ -14,7 +14,7 @@ use tower_sessions::Session;
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
     AccessToken, AccessTokenHash, AuthenticationContextClass, CsrfToken, IdTokenClaims,
-    IdTokenVerifier, Nonce, OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
+    IdTokenVerifier, Nonce, NonceVerifier, OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse,
 };
@@ -367,7 +367,12 @@ async fn try_refresh_token<AC: AdditionalClaims>(
                 .id_token()
                 .ok_or(MiddlewareError::IdTokenMissing)?;
             let id_token_verifier = client.client.id_token_verifier();
-            let claims = id_token.claims(&id_token_verifier, nonce)?;
+            let claims = id_token.claims(&id_token_verifier, |claims_nonce: Option<&Nonce>| {
+                match claims_nonce {
+                    Some(_) => nonce.verify(claims_nonce),
+                    None => Ok(()),
+                }
+            })?;
 
             validate_access_token_hash(
                 id_token,
