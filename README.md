@@ -31,5 +31,5 @@ Feel free to submit feature requests and bug reports using a GitHub Issue.
 PR's are also appreciated.
 
 # License
-This Library is licensed under [LGPLv3](https://www.gnu.org/licenses/lgpl-3.0.en.html).
+This Library is licensed under [MPLv2](https://www.mozilla.org/en-US/MPL/2.0/).
 
