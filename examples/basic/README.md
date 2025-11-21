@@ -8,8 +8,6 @@ It has three endpoints:
 ## Dependencies
 You will need a running OpenID Connect capable issuer like [Keycloak](https://www.keycloak.org/getting-started/getting-started-docker) and a valid client for the issuer.
 
-You can take a look at the `tests/`-folder to see how the automated keycloak deployment for the integration tests work.
-
 ## Setup Environment
 Create a `.env`-file that contains the following keys:
 ```
