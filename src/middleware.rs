@@ -298,6 +298,7 @@ where
             let has_logout_ext = response.extensions().get::<ClearSessionFlag>().is_some();
             if let (true, Some(mut login_session)) = (has_logout_ext, login_session) {
                 login_session.authenticated = None;
+                login_session.refresh_token = None;
                 session.insert(SESSION_KEY, login_session).await?;
             }
 
