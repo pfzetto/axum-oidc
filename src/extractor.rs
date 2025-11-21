@@ -7,7 +7,7 @@ use axum_core::{
     response::IntoResponse,
 };
 use http::{request::Parts, uri::PathAndQuery, Uri};
-use openidconnect::{core::CoreGenderClaim, IdTokenClaims};
+use openidconnect::{core::CoreGenderClaim, ClientId, IdTokenClaims};
 
 /// Extractor for the OpenID Connect Claims.
 ///
@@ -113,7 +113,7 @@ impl AsRef<str> for OidcAccessToken {
 pub struct OidcRpInitiatedLogout {
     pub(crate) end_session_endpoint: Uri,
     pub(crate) id_token_hint: Box<str>,
-    pub(crate) client_id: Box<str>,
+    pub(crate) client_id: ClientId,
     pub(crate) post_logout_redirect_uri: Option<Uri>,
     pub(crate) state: Option<String>,
 }

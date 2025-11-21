@@ -11,8 +11,8 @@ pub struct HttpClient(reqwest::Client);
 pub struct RedirectUrl(Uri);
 
 pub struct ClientCredentials {
-    id: Box<str>,
-    secret: Option<Box<str>>,
+    id: ClientId,
+    secret: Option<ClientSecret>,
 }
 
 pub struct Builder<AC: AdditionalClaims, Credentials, Client, HttpClient, RedirectUrl> {
@@ -77,7 +77,7 @@ impl<AC: AdditionalClaims, CLIENT, HTTP, RURL> Builder<AC, (), CLIENT, HTTP, RUR
     /// set client id for authentication with issuer
     pub fn with_client_id(
         self,
-        id: impl Into<Box<str>>,
+        id: impl Into<ClientId>,
     ) -> Builder<AC, ClientCredentials, CLIENT, HTTP, RURL> {
         Builder::<_, _, _, _, _> {
             credentials: ClientCredentials {
@@ -97,7 +97,7 @@ impl<AC: AdditionalClaims, CLIENT, HTTP, RURL> Builder<AC, (), CLIENT, HTTP, RUR
 
 impl<AC: AdditionalClaims, CLIENT, HTTP, RURL> Builder<AC, ClientCredentials, CLIENT, HTTP, RURL> {
     /// set client secret for authentication with issuer
-    pub fn with_client_secret(mut self, secret: impl Into<Box<str>>) -> Self {
+    pub fn with_client_secret(mut self, secret: impl Into<ClientSecret>) -> Self {
         self.credentials.secret = Some(secret.into());
         self
     }
@@ -172,10 +172,7 @@ impl<AC: AdditionalClaims> Builder<AC, ClientCredentials, (), HttpClient, Redire
         let client = Client::from_provider_metadata(
             provider_metadata,
             ClientId::new(self.credentials.id.to_string()),
-            self.credentials
-                .secret
-                .as_ref()
-                .map(|x| ClientSecret::new(x.to_string())),
+            self.credentials.secret.clone(),
         )
         .set_redirect_uri(openidconnect::RedirectUrl::new(
             self.redirect_url.0.to_string(),

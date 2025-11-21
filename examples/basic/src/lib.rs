@@ -6,8 +6,8 @@ use axum::{
     Router,
 };
 use axum_oidc::{
-    error::MiddlewareError, handle_oidc_redirect, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims,
-    OidcClient, OidcLoginLayer, OidcRpInitiatedLogout,
+    error::MiddlewareError, handle_oidc_redirect, ClientId, ClientSecret, EmptyAdditionalClaims,
+    OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer, OidcRpInitiatedLogout,
 };
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -33,9 +33,9 @@ pub async fn run(issuer: String, client_id: String, client_secret: Option<String
     let mut oidc_client = OidcClient::<EmptyAdditionalClaims>::builder()
         .with_default_http_client()
         .with_redirect_url(Uri::from_static("http://localhost:8080/oidc"))
-        .with_client_id(client_id);
+        .with_client_id(ClientId::new(client_id));
     if let Some(client_secret) = client_secret {
-        oidc_client = oidc_client.with_client_secret(client_secret);
+        oidc_client = oidc_client.with_client_secret(ClientSecret::new(client_secret));
     }
     let oidc_client = oidc_client.discover(issuer).await.unwrap().build();
 

@@ -27,6 +27,7 @@ mod middleware;
 pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout};
 pub use handler::handle_oidc_redirect;
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
+pub use openidconnect::{Audience, ClientId, ClientSecret};
 
 const SESSION_KEY: &str = "axum-oidc";
 
@@ -102,7 +103,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Clone)]
 pub struct OidcClient<AC: AdditionalClaims> {
     scopes: Vec<Box<str>>,
-    client_id: Box<str>,
+    client_id: ClientId,
     client: Client<AC>,
     http_client: reqwest::Client,
     end_session_endpoint: Option<Uri>,
