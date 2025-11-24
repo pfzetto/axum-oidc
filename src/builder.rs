@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use http::Uri;
-use openidconnect::{ClientId, ClientSecret, IssuerUrl};
+use openidconnect::{Audience, ClientId, ClientSecret, IssuerUrl};
 
 use crate::{error::Error, AdditionalClaims, Client, OidcClient, ProviderMetadata};
 
@@ -23,6 +23,7 @@ pub struct Builder<AC: AdditionalClaims, Credentials, Client, HttpClient, Redire
     end_session_endpoint: Option<Uri>,
     scopes: Vec<Box<str>>,
     auth_context_class: Option<Box<str>>,
+    untrusted_audiences: Vec<Audience>,
     _ac: PhantomData<AC>,
 }
 
@@ -42,6 +43,7 @@ impl<AC: AdditionalClaims> Builder<AC, (), (), (), ()> {
             end_session_endpoint: None,
             scopes: vec![Box::from("openid")],
             auth_context_class: None,
+            untrusted_audiences: Vec::new(),
             _ac: PhantomData,
         }
     }
@@ -60,6 +62,7 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, HTTP, RURL> Builder<AC, CREDS, CLIENT,
         self.scopes.push(scope.into());
         self
     }
+
     /// replace scopes (including default)
     pub fn with_scopes(mut self, scopes: impl Iterator<Item = impl Into<Box<str>>>) -> Self {
         self.scopes = scopes.map(|x| x.into()).collect::<Vec<_>>();
@@ -69,6 +72,18 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, HTTP, RURL> Builder<AC, CREDS, CLIENT,
     /// authenticate with Authentication Context Class Reference
     pub fn with_auth_context_class(mut self, acr: impl Into<Box<str>>) -> Self {
         self.auth_context_class = Some(acr.into());
+        self
+    }
+
+    /// add a an untrusted audience to existing untrusted audiences
+    pub fn add_untrusted_audience(mut self, audience: Audience) -> Self {
+        self.untrusted_audiences.push(audience);
+        self
+    }
+
+    /// replace untrusted audiences
+    pub fn with_untrusted_audiences(mut self, untrusted_audiences: Vec<Audience>) -> Self {
+        self.untrusted_audiences = untrusted_audiences;
         self
     }
 }
@@ -90,6 +105,7 @@ impl<AC: AdditionalClaims, CLIENT, HTTP, RURL> Builder<AC, (), CLIENT, HTTP, RUR
             end_session_endpoint: self.end_session_endpoint,
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
+            untrusted_audiences: self.untrusted_audiences,
             _ac: PhantomData,
         }
     }
@@ -117,6 +133,7 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, RURL> Builder<AC, CREDS, CLIENT, (), R
             end_session_endpoint: self.end_session_endpoint,
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
+            untrusted_audiences: self.untrusted_audiences,
             _ac: self._ac,
         }
     }
@@ -130,6 +147,7 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, RURL> Builder<AC, CREDS, CLIENT, (), R
             end_session_endpoint: self.end_session_endpoint,
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
+            untrusted_audiences: self.untrusted_audiences,
             _ac: self._ac,
         }
     }
@@ -148,6 +166,7 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, HCLIENT> Builder<AC, CREDS, CLIENT, HC
             end_session_endpoint: self.end_session_endpoint,
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
+            untrusted_audiences: self.untrusted_audiences,
             _ac: self._ac,
         }
     }
@@ -186,6 +205,7 @@ impl<AC: AdditionalClaims> Builder<AC, ClientCredentials, (), HttpClient, Redire
             end_session_endpoint,
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
+            untrusted_audiences: self.untrusted_audiences,
             _ac: self._ac,
         })
     }
@@ -217,6 +237,7 @@ impl<AC: AdditionalClaims>
             http_client: self.http_client.0,
             end_session_endpoint: self.end_session_endpoint,
             auth_context_class: self.auth_context_class,
+            untrusted_audiences: self.untrusted_audiences,
         }
     }
 }

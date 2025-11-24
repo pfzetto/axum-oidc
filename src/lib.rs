@@ -24,7 +24,7 @@ mod extractor;
 mod handler;
 mod middleware;
 
-pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout};
+pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout, OidcUserInfo};
 pub use handler::handle_oidc_redirect;
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
 pub use openidconnect::{Audience, ClientId, ClientSecret};
@@ -108,6 +108,7 @@ pub struct OidcClient<AC: AdditionalClaims> {
     http_client: reqwest::Client,
     end_session_endpoint: Option<Uri>,
     auth_context_class: Option<Box<str>>,
+    untrusted_audiences: Vec<Audience>,
 }
 
 /// an empty struct to be used as the default type for the additional claims generic
