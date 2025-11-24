@@ -3,24 +3,30 @@ name = "axum-oidc"
 description = "A wrapper for the openidconnect crate for axum"
 version = "0.6.0"
 edition = "2021"
-authors = [ "Paul Z <info@pfz4.de>" ]
+authors = ["Paul Z <info@pfz4.de>"]
 readme = "README.md"
 repository = "https://github.com/pfz4/axum-oidc"
 license = "MPL-2.0"
-keywords = [ "axum", "oidc", "openidconnect", "authentication" ]
+keywords = ["axum", "oidc", "openidconnect", "authentication"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 thiserror = "2.0"
 axum-core = "0.5"
-axum = { version = "0.8", default-features = false, features = [ "query", "original-uri" ] }
+axum = { version = "0.8", default-features = false, features = [
+    "query",
+    "original-uri",
+] }
 tower-service = "0.3"
 tower-layer = "0.3"
-tower-sessions = { version = "0.14", default-features = false, features = [ "axum-core" ] }
-http = "1.2"
+tower-sessions = { version = "0.14", default-features = false, features = [
+    "axum-core",
+] }
+http = "1.3.1"
 openidconnect = "4.0"
 serde = "1.0"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false }
 urlencoding = "2.1"
+tracing = "0.1.41"

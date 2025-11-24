@@ -1,12 +1,16 @@
 [package]
+edition = "2024"
 name = "basic"
 version = "0.1.0"
-edition = "2021"
 
 [dependencies]
-tokio = { version = "1.43", features = ["net", "macros", "rt-multi-thread"] }
-axum = { version = "0.8", features = [ "macros" ]}
+axum = { version = "0.8", features = ["macros"] }
 axum-oidc = { path = "./../.." }
+dotenvy = "0.15"
+openidconnect = "4.0.1"
+tokio = { version = "1.48.0", features = ["macros", "net", "rt-multi-thread"] }
 tower = "0.5"
 tower-sessions = "0.14"
-dotenvy = "0.15"
+tracing-subscriber = "0.3.20"
+tracing = "0.1.41"
+serde = "1.0.228"

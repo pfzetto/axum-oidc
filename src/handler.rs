@@ -21,11 +21,14 @@ pub struct OidcQuery {
     session_state: Option<String>,
 }
 
+#[tracing::instrument(skip(oidcclient), err)]
 pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
     session: Session,
     Extension(oidcclient): Extension<OidcClient<AC>>,
     Query(query): Query<OidcQuery>,
 ) -> Result<impl axum::response::IntoResponse, HandlerError> {
+    tracing::debug!("start handling oidc redirect");
+
     let mut login_session: OidcSession<AC> = session
         .get(SESSION_KEY)
         .await?
@@ -33,10 +36,12 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
     // the request has the request headers of the oidc redirect
     // parse the headers and exchange the code for a valid token
 
+    tracing::debug!("validating scrf token");
     if login_session.csrf_token.secret() != &query.state {
         return Err(HandlerError::CsrfTokenInvalid);
     }
 
+    tracing::debug!("obtain token response");
     let token_response = oidcclient
         .client
         .exchange_code(AuthorizationCode::new(query.code.to_string()))?
@@ -47,19 +52,29 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
         .request_async(&oidcclient.http_client)
         .await?;
 
+    tracing::debug!("extract claims and verify it");
     // Extract the ID token claims after verifying its authenticity and nonce.
     let id_token = token_response
         .id_token()
         .ok_or(HandlerError::IdTokenMissing)?;
-    let id_token_verifier = oidcclient.client.id_token_verifier();
+    let id_token_verifier = oidcclient
+        .client
+        .id_token_verifier()
+        .set_other_audience_verifier_fn(|audience|
+            // Return false (reject) if audience is in list of untrusted audiences
+            !oidcclient.untrusted_audiences.contains(audience));
     let claims = id_token.claims(&id_token_verifier, &login_session.nonce)?;
 
+    tracing::debug!("validate access token hash");
     validate_access_token_hash(
         id_token,
         id_token_verifier,
         token_response.access_token(),
         claims,
-    )?;
+    )
+    .inspect_err(|e| tracing::error!(?e, "Access token hash invalid"))?;
+
+    tracing::debug!("Access token hash validated");
 
     login_session.authenticated = Some(AuthenticatedSession {
         id_token: id_token.clone(),
@@ -70,6 +85,10 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
         login_session.refresh_token = Some(refresh_token);
     }
 
+    tracing::debug!(
+        "Inserting session and redirecting to {}",
+        &login_session.redirect_url
+    );
     let redirect_url = login_session.redirect_url.clone();
     session.insert(SESSION_KEY, login_session).await?;
 
@@ -79,6 +98,7 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
 /// Verify the access token hash to ensure that the access token hasn't been substituted for
 /// another user's.
 /// Returns `Ok` when access token is valid
+#[tracing::instrument(skip_all, err)]
 fn validate_access_token_hash<AC: AdditionalClaims>(
     id_token: &IdToken<AC>,
     id_token_verifier: IdTokenVerifier<CoreJsonWebKey>,

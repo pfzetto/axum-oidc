@@ -6,8 +6,9 @@ use axum::{
     Router,
 };
 use axum_oidc::{
-    error::MiddlewareError, handle_oidc_redirect, ClientId, ClientSecret, EmptyAdditionalClaims,
-    OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer, OidcRpInitiatedLogout,
+    error::MiddlewareError, handle_oidc_redirect, Audience, ClientId, ClientSecret,
+    EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer,
+    OidcRpInitiatedLogout,
 };
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -15,9 +16,15 @@ use tower_sessions::{
     cookie::{time::Duration, SameSite},
     Expiry, MemoryStore, SessionManagerLayer,
 };
+use tracing::Level;
 
 #[tokio::main]
-pub async fn main() {
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_file(true)
+        .with_line_number(true)
+        .with_max_level(Level::INFO)
+        .init();
     dotenvy::dotenv().ok();
     let issuer = std::env::var("ISSUER").expect("ISSUER env variable");
     let client_id = std::env::var("CLIENT_ID").expect("CLIENT_ID env variable");
@@ -39,7 +46,12 @@ pub async fn main() {
     let mut oidc_client = OidcClient::<EmptyAdditionalClaims>::builder()
         .with_default_http_client()
         .with_redirect_url(Uri::from_static("http://localhost:8080/oidc"))
-        .with_client_id(ClientId::new(client_id));
+        .with_client_id(ClientId::new(client_id))
+        .add_scope("profile")
+        .add_scope("email")
+        // Optional: add untrusted audiences. If the `aud` claim contains any of these audiences, the token is rejected.
+        .add_untrusted_audience(Audience::new("123456789".to_string()));
+
     if let Some(client_secret) = client_secret {
         oidc_client = oidc_client.with_client_secret(ClientSecret::new(client_secret));
     }
@@ -60,6 +72,9 @@ pub async fn main() {
         .route("/oidc", any(handle_oidc_redirect::<EmptyAdditionalClaims>))
         .layer(oidc_auth_service)
         .layer(session_layer);
+
+    tracing::info!("Running on http://localhost:8080");
+    tracing::info!("Visit http://localhost:8080/bar or http://localhost:8080/foo");
 
     let listener = TcpListener::bind("[::]:8080").await.unwrap();
     axum::serve(listener, app.into_make_service())
