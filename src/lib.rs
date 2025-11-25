@@ -12,9 +12,9 @@ use openidconnect::{
         CoreResponseMode, CoreResponseType, CoreRevocableToken, CoreRevocationErrorResponse,
         CoreSubjectIdentifierType, CoreTokenIntrospectionResponse, CoreTokenType,
     },
-    AccessToken, CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
-    IdTokenFields, Nonce, PkceCodeVerifier, RefreshToken, StandardErrorResponse,
-    StandardTokenResponse,
+    AccessToken, Audience, AuthenticationContextClass, ClientId, CsrfToken, EmptyExtraTokenFields,
+    EndpointMaybeSet, EndpointNotSet, EndpointSet, IdTokenFields, Nonce, PkceCodeVerifier,
+    RefreshToken, Scope, StandardErrorResponse, StandardTokenResponse,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -27,7 +27,7 @@ mod middleware;
 pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout, OidcUserInfo};
 pub use handler::handle_oidc_redirect;
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
-pub use openidconnect::{Audience, ClientId, ClientSecret};
+pub use openidconnect;
 
 const SESSION_KEY: &str = "axum-oidc";
 
@@ -102,12 +102,12 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 /// OpenID Connect Client
 #[derive(Clone)]
 pub struct OidcClient<AC: AdditionalClaims> {
-    scopes: Vec<Box<str>>,
+    scopes: Vec<Scope>,
     client_id: ClientId,
     client: Client<AC>,
     http_client: reqwest::Client,
     end_session_endpoint: Option<Uri>,
-    auth_context_class: Option<Box<str>>,
+    auth_context_class: Option<AuthenticationContextClass>,
     untrusted_audiences: Vec<Audience>,
 }
 

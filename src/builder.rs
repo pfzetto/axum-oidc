@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 
 use http::Uri;
-use openidconnect::{Audience, ClientId, ClientSecret, IssuerUrl};
+use openidconnect::{
+    Audience, AuthenticationContextClass, ClientId, ClientSecret, IssuerUrl, Scope,
+};
 
 use crate::{error::Error, AdditionalClaims, Client, OidcClient, ProviderMetadata};
 
@@ -21,8 +23,8 @@ pub struct Builder<AC: AdditionalClaims, Credentials, Client, HttpClient, Redire
     http_client: HttpClient,
     redirect_url: RedirectUrl,
     end_session_endpoint: Option<Uri>,
-    scopes: Vec<Box<str>>,
-    auth_context_class: Option<Box<str>>,
+    scopes: Vec<Scope>,
+    auth_context_class: Option<AuthenticationContextClass>,
     untrusted_audiences: Vec<Audience>,
     _ac: PhantomData<AC>,
 }
@@ -41,7 +43,7 @@ impl<AC: AdditionalClaims> Builder<AC, (), (), (), ()> {
             http_client: (),
             redirect_url: (),
             end_session_endpoint: None,
-            scopes: vec![Box::from("openid")],
+            scopes: vec![Scope::new("openid".to_string())],
             auth_context_class: None,
             untrusted_audiences: Vec::new(),
             _ac: PhantomData,
@@ -58,20 +60,20 @@ impl<AC: AdditionalClaims> OidcClient<AC> {
 
 impl<AC: AdditionalClaims, CREDS, CLIENT, HTTP, RURL> Builder<AC, CREDS, CLIENT, HTTP, RURL> {
     /// add a scope to existing (default) scopes
-    pub fn add_scope(mut self, scope: impl Into<Box<str>>) -> Self {
-        self.scopes.push(scope.into());
+    pub fn add_scope(mut self, scope: Scope) -> Self {
+        self.scopes.push(scope);
         self
     }
 
     /// replace scopes (including default)
-    pub fn with_scopes(mut self, scopes: impl Iterator<Item = impl Into<Box<str>>>) -> Self {
-        self.scopes = scopes.map(|x| x.into()).collect::<Vec<_>>();
+    pub fn with_scopes(mut self, scopes: Vec<Scope>) -> Self {
+        self.scopes = scopes;
         self
     }
 
     /// authenticate with Authentication Context Class Reference
-    pub fn with_auth_context_class(mut self, acr: impl Into<Box<str>>) -> Self {
-        self.auth_context_class = Some(acr.into());
+    pub fn with_auth_context_class(mut self, acr: AuthenticationContextClass) -> Self {
+        self.auth_context_class = Some(acr);
         self
     }
 
@@ -212,14 +214,13 @@ impl<AC: AdditionalClaims> Builder<AC, ClientCredentials, (), HttpClient, Redire
     /// discover issuer details
     pub async fn discover(
         self,
-        issuer: String,
+        issuer: IssuerUrl,
     ) -> Result<
         Builder<AC, ClientCredentials, OpenidconnectClient<AC>, HttpClient, RedirectUrl>,
         Error,
     > {
-        let issuer_url = IssuerUrl::new(issuer)?;
         let http_client = self.http_client.0.clone();
-        let provider_metadata = ProviderMetadata::discover_async(issuer_url, &http_client);
+        let provider_metadata = ProviderMetadata::discover_async(issuer, &http_client);
 
         Self::manual(self, provider_metadata.await?)
     }

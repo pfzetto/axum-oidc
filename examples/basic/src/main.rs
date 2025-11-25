@@ -1,20 +1,22 @@
 use axum::{
+    Router,
     error_handling::HandleErrorLayer,
     http::Uri,
     response::IntoResponse,
     routing::{any, get},
-    Router,
 };
 use axum_oidc::{
-    error::MiddlewareError, handle_oidc_redirect, Audience, ClientId, ClientSecret,
     EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer,
     OidcRpInitiatedLogout,
+    error::MiddlewareError,
+    handle_oidc_redirect,
+    openidconnect::{Audience, ClientId, ClientSecret, IssuerUrl, Scope},
 };
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_sessions::{
-    cookie::{time::Duration, SameSite},
     Expiry, MemoryStore, SessionManagerLayer,
+    cookie::{SameSite, time::Duration},
 };
 use tracing::Level;
 
@@ -47,15 +49,19 @@ async fn main() {
         .with_default_http_client()
         .with_redirect_url(Uri::from_static("http://localhost:8080/oidc"))
         .with_client_id(ClientId::new(client_id))
-        .add_scope("profile")
-        .add_scope("email")
+        .add_scope(Scope::new("profile".into()))
+        .add_scope(Scope::new("email".into()))
         // Optional: add untrusted audiences. If the `aud` claim contains any of these audiences, the token is rejected.
         .add_untrusted_audience(Audience::new("123456789".to_string()));
 
     if let Some(client_secret) = client_secret {
         oidc_client = oidc_client.with_client_secret(ClientSecret::new(client_secret));
     }
-    let oidc_client = oidc_client.discover(issuer).await.unwrap().build();
+    let oidc_client = oidc_client
+        .discover(IssuerUrl::new(issuer.into()).expect("Invalid IssuerUrl"))
+        .await
+        .unwrap()
+        .build();
 
     let oidc_auth_service = ServiceBuilder::new()
         .layer(HandleErrorLayer::new(|e: MiddlewareError| async {
