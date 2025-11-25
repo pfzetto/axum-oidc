@@ -16,8 +16,8 @@ use tower_sessions::Session;
 
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
-    AccessToken, AccessTokenHash, AuthenticationContextClass, CsrfToken, IdTokenClaims,
-    IdTokenVerifier, Nonce, OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
+    AccessToken, AccessTokenHash, CsrfToken, IdTokenClaims, IdTokenVerifier, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse, UserInfoClaims,
 };
@@ -143,8 +143,7 @@ where
                     }
 
                     if let Some(acr) = oidcclient.auth_context_class {
-                        auth = auth
-                            .add_auth_context_value(AuthenticationContextClass::new(acr.into()));
+                        auth = auth.add_auth_context_value(acr);
                     }
 
                     auth.set_pkce_challenge(pkce_challenge).url()
