@@ -12,9 +12,9 @@ use openidconnect::{
         CoreResponseMode, CoreResponseType, CoreRevocableToken, CoreRevocationErrorResponse,
         CoreSubjectIdentifierType, CoreTokenIntrospectionResponse, CoreTokenType,
     },
-    AccessToken, CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
-    IdTokenFields, Nonce, PkceCodeVerifier, RefreshToken, StandardErrorResponse,
-    StandardTokenResponse,
+    AccessToken, Audience, ClientId, CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet,
+    EndpointNotSet, EndpointSet, IdTokenFields, Nonce, PkceCodeVerifier, RefreshToken,
+    StandardErrorResponse, StandardTokenResponse,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -27,7 +27,7 @@ mod middleware;
 pub use extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout, OidcUserInfo};
 pub use handler::handle_oidc_redirect;
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
-pub use openidconnect::{Audience, ClientId, ClientSecret};
+pub use openidconnect;
 
 const SESSION_KEY: &str = "axum-oidc";
 

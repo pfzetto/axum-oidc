@@ -6,7 +6,7 @@ use axum::{
     Router,
 };
 use axum_oidc::{
-    error::MiddlewareError, handle_oidc_redirect, Audience, ClientId, ClientSecret,
+    error::MiddlewareError, handle_oidc_redirect, openidconnect::{Audience, ClientId, ClientSecret},
     EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer,
     OidcRpInitiatedLogout,
 };
