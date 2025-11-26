@@ -17,7 +17,7 @@ use tower_sessions::Session;
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
     AccessToken, AccessTokenHash, CsrfToken, IdTokenClaims, IdTokenVerifier, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
+    NonceVerifier as _, OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse, UserInfoClaims,
 };
@@ -425,7 +425,12 @@ async fn try_refresh_token<AC: AdditionalClaims>(
                 .set_other_audience_verifier_fn(|audience|
                     // Return false (reject) if audience is in list of untrusted audiences
                     !client.untrusted_audiences.contains(audience));
-            let claims = id_token.claims(&id_token_verifier, nonce)?;
+            let claims = id_token.claims(&id_token_verifier, |claims_nonce: Option<&Nonce>| {
+                match claims_nonce {
+                    Some(_) => nonce.verify(claims_nonce),
+                    None => Ok(()),
+                }
+            })?;
 
             validate_access_token_hash(
                 id_token,
