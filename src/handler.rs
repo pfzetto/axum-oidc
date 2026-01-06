@@ -8,8 +8,8 @@ use serde::Deserialize;
 use tower_sessions::Session;
 
 use crate::{
-    error::HandlerError, AdditionalClaims, AuthenticatedSession, IdToken, OidcClient, OidcSession,
-    SESSION_KEY,
+    error::HandlerError, middleware::get_user_claims, AdditionalClaims, AuthenticatedSession,
+    IdToken, OidcClient, OidcSession, SESSION_KEY,
 };
 
 /// response data of the openid issuer after login
@@ -29,7 +29,7 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
 ) -> Result<impl axum::response::IntoResponse, HandlerError> {
     tracing::debug!("start handling oidc redirect");
 
-    let mut login_session: OidcSession<AC> = session
+    let mut login_session: OidcSession<AC, CoreGenderClaim> = session
         .get(SESSION_KEY)
         .await?
         .ok_or(HandlerError::RedirectedWithoutSession)?;
@@ -76,9 +76,12 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
 
     tracing::debug!("Access token hash validated");
 
+    let user_info = get_user_claims(&oidcclient, token_response.access_token().clone()).await?;
+
     login_session.authenticated = Some(AuthenticatedSession {
         id_token: id_token.clone(),
         access_token: token_response.access_token().clone(),
+        user_info: user_info.into(),
     });
     let refresh_token = token_response.refresh_token().cloned();
     if let Some(refresh_token) = refresh_token {

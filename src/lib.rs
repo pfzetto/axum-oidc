@@ -13,8 +13,9 @@ use openidconnect::{
         CoreSubjectIdentifierType, CoreTokenIntrospectionResponse, CoreTokenType,
     },
     AccessToken, Audience, AuthenticationContextClass, ClientId, CsrfToken, EmptyExtraTokenFields,
-    EndpointMaybeSet, EndpointNotSet, EndpointSet, IdTokenFields, Nonce, PkceCodeVerifier,
-    RefreshToken, Scope, StandardErrorResponse, StandardTokenResponse,
+    EndpointMaybeSet, EndpointNotSet, EndpointSet, GenderClaim, IdTokenFields, Nonce,
+    PkceCodeVerifier, RefreshToken, Scope, StandardClaims, StandardErrorResponse,
+    StandardTokenResponse,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -120,20 +121,45 @@ impl openidconnect::AdditionalClaims for EmptyAdditionalClaims {}
 /// oidc session
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(bound = "AC: Serialize + DeserializeOwned")]
-struct OidcSession<AC: AdditionalClaims> {
+struct OidcSession<AC: AdditionalClaims, GC: GenderClaim> {
     nonce: Nonce,
     csrf_token: CsrfToken,
     pkce_verifier: PkceCodeVerifier,
-    authenticated: Option<AuthenticatedSession<AC>>,
+    authenticated: Option<AuthenticatedSession<AC, GC>>,
     refresh_token: Option<RefreshToken>,
     redirect_url: Box<str>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(bound = "AC: Serialize + DeserializeOwned")]
-struct AuthenticatedSession<AC: AdditionalClaims> {
+struct AuthenticatedSession<AC: AdditionalClaims, GC: GenderClaim> {
     id_token: IdToken<AC>,
     access_token: AccessToken,
+    user_info: UserInfoClaims<AC, GC>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(bound = "AC: Serialize + DeserializeOwned")]
+pub struct UserInfoClaims<AC: AdditionalClaims, GC: GenderClaim> {
+    pub issuer: Option<openidconnect::IssuerUrl>,
+    pub audiences: Option<Vec<Audience>>,
+    pub standard_claims: StandardClaims<GC>,
+    pub additional_claims: AC,
+}
+
+impl<AC, GC> From<openidconnect::UserInfoClaims<AC, GC>> for UserInfoClaims<AC, GC>
+where
+    AC: AdditionalClaims,
+    GC: GenderClaim,
+{
+    fn from(value: openidconnect::UserInfoClaims<AC, GC>) -> Self {
+        Self {
+            issuer: value.issuer().cloned(),
+            audiences: value.audiences().cloned(),
+            standard_claims: value.standard_claims().clone(),
+            additional_claims: value.additional_claims().clone(),
+        }
+    }
 }
 
 /// additional metadata that is discovered on client creation via the
