@@ -120,6 +120,9 @@ pub enum HandlerError {
 
     #[error("claims verification: {0:?}")]
     ClaimsVerification(#[from] openidconnect::ClaimsVerificationError),
+
+    #[error("user info retrieval error: {0:?}")]
+    ClaimsRetrieval(#[from] MiddlewareError),
 }
 
 #[derive(Debug, Error)]

@@ -149,7 +149,7 @@ where
                     auth.set_pkce_challenge(pkce_challenge).url()
                 };
 
-                let oidc_session = OidcSession::<AC> {
+                let oidc_session = OidcSession::<AC, CoreGenderClaim> {
                     nonce,
                     csrf_token,
                     pkce_verifier,
@@ -245,7 +245,7 @@ where
                 .get::<Session>()
                 .ok_or(MiddlewareError::SessionNotFound)?
                 .clone();
-            let mut login_session: Option<OidcSession<AC>> = session
+            let mut login_session: Option<OidcSession<AC, CoreGenderClaim>> = session
                 .get(SESSION_KEY)
                 .await
                 .map_err(MiddlewareError::from)?;
@@ -270,28 +270,14 @@ where
                 });
 
                 if let Some((session, claims)) = id_token_claims {
-                    let user_claims =
-                        get_user_claims(&oidcclient, session.access_token.clone()).await?;
                     // stored id token is valid and can be used
-                    insert_extensions(
-                        &mut parts,
-                        claims.clone(),
-                        user_claims,
-                        &oidcclient,
-                        session,
-                    );
+                    insert_extensions(&mut parts, claims.clone(), &oidcclient, session);
                 } else if let Some(refresh_token) = login_session.refresh_token.as_ref() {
                     // session is expired but can be refreshed using the refresh_token
-                    if let Some((claims, user_claims, authenticated_session, refresh_token)) =
+                    if let Some((claims, authenticated_session, refresh_token)) =
                         try_refresh_token(&oidcclient, refresh_token, &login_session.nonce).await?
                     {
-                        insert_extensions(
-                            &mut parts,
-                            claims,
-                            user_claims.clone(),
-                            &oidcclient,
-                            &authenticated_session,
-                        );
+                        insert_extensions(&mut parts, claims, &oidcclient, &authenticated_session);
                         login_session.authenticated = Some(authenticated_session);
 
                         if let Some(refresh_token) = refresh_token {
@@ -334,12 +320,13 @@ where
 fn insert_extensions<AC: AdditionalClaims>(
     parts: &mut Parts,
     claims: IdTokenClaims<AC, CoreGenderClaim>,
-    user_claims: UserInfoClaims<AC, CoreGenderClaim>,
     client: &OidcClient<AC>,
-    authenticated_session: &AuthenticatedSession<AC>,
+    authenticated_session: &AuthenticatedSession<AC, CoreGenderClaim>,
 ) {
     parts.extensions.insert(OidcClaims(claims));
-    parts.extensions.insert(OidcUserInfo(user_claims));
+    parts
+        .extensions
+        .insert(OidcUserInfo(authenticated_session.user_info.clone()));
     parts.extensions.insert(OidcAccessToken(
         authenticated_session.access_token.secret().to_string(),
     ));
@@ -381,7 +368,7 @@ fn validate_access_token_hash<AC: AdditionalClaims>(
     }
 }
 
-async fn get_user_claims<AC: AdditionalClaims>(
+pub(crate) async fn get_user_claims<AC: AdditionalClaims>(
     client: &OidcClient<AC>,
     access_token: AccessToken,
 ) -> Result<UserInfoClaims<AC, CoreGenderClaim>, MiddlewareError> {
@@ -401,8 +388,7 @@ async fn try_refresh_token<AC: AdditionalClaims>(
 ) -> Result<
     Option<(
         IdTokenClaims<AC, CoreGenderClaim>,
-        UserInfoClaims<AC, CoreGenderClaim>,
-        AuthenticatedSession<AC>,
+        AuthenticatedSession<AC, CoreGenderClaim>,
         Option<RefreshToken>,
     )>,
     MiddlewareError,
@@ -439,17 +425,18 @@ async fn try_refresh_token<AC: AdditionalClaims>(
                 claims,
             )?;
 
+            let access_token = token_response.access_token().clone();
+
+            let user_claims = get_user_claims(client, access_token.clone()).await?;
+
             let authenticated_session = AuthenticatedSession {
                 id_token: id_token.clone(),
-                access_token: token_response.access_token().clone(),
+                access_token,
+                user_info: user_claims.into(),
             };
-
-            let user_claims =
-                get_user_claims(client, authenticated_session.access_token.clone()).await?;
 
             Ok(Some((
                 claims.clone(),
-                user_claims,
                 authenticated_session,
                 token_response.refresh_token().cloned(),
             )))
