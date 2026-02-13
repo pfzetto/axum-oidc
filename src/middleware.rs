@@ -252,6 +252,7 @@ where
 
             if let Some(login_session) = &mut login_session {
                 let id_token_claims = login_session.authenticated.as_ref().and_then(|session| {
+                    let nonce = login_session.nonce.clone();
                     session
                         .id_token
                         .claims(
@@ -262,7 +263,11 @@ where
                                     // Return false (reject) if audience is in list of untrusted audiences
                                     !oidcclient.untrusted_audiences.contains(audience)
                                 }),
-                            &login_session.nonce,
+                            // Accept tokens without a nonce (common after token refresh)
+                            |claims_nonce: Option<&Nonce>| match claims_nonce {
+                                Some(_) => nonce.verify(claims_nonce),
+                                None => Ok(()),
+                            },
                         )
                         .ok()
                         .cloned()
