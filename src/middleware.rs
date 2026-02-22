@@ -446,9 +446,14 @@ async fn try_refresh_token<AC: AdditionalClaims>(
                 token_response.refresh_token().cloned(),
             )))
         }
-        Err(ServerResponse(e)) if *e.error() == CoreErrorResponseType::InvalidGrant => {
+        Err(ServerResponse(e))
+            if *e.error() == CoreErrorResponseType::InvalidGrant
+                || e.error().as_ref() == "JwtToken" =>
+        {
             // Refresh failed, refresh_token most likely expired or
-            // invalid, the session can be considered lost
+            // invalid, the session can be considered lost.
+            // Some providers (e.g. Keycloak) return "JwtToken" instead of
+            // "invalid_grant" for expired JWT-format refresh tokens.
             Ok(None)
         }
         Err(err) => Err(err.into()),
