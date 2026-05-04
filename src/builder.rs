@@ -1,5 +1,6 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
+use arc_swap::ArcSwap;
 use http::Uri;
 use openidconnect::{
     Audience, AuthenticationContextClass, ClientId, ClientSecret, IssuerUrl, Scope,
@@ -234,7 +235,9 @@ impl<AC: AdditionalClaims>
         OidcClient {
             scopes: self.scopes,
             client_id: self.credentials.id,
-            client: self.client.0,
+            client_secret: self.credentials.secret,
+            redirect_url: self.redirect_url.0,
+            client: Arc::new(ArcSwap::from_pointee(self.client.0)),
             http_client: self.http_client.0,
             end_session_endpoint: self.end_session_endpoint,
             auth_context_class: self.auth_context_class,
