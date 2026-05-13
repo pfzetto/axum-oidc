@@ -44,7 +44,7 @@ impl<AC: AdditionalClaims> Builder<AC, (), (), (), ()> {
             http_client: (),
             redirect_url: (),
             end_session_endpoint: None,
-            scopes: vec![Scope::new("openid".to_string())],
+            scopes: vec![],
             auth_context_class: None,
             untrusted_audiences: Vec::new(),
             _ac: PhantomData,
