@@ -42,8 +42,8 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
     }
 
     tracing::debug!("obtain token response");
-    let token_response = oidcclient
-        .client
+    let inner_client = oidcclient.client.load();
+    let token_response = inner_client
         .exchange_code(AuthorizationCode::new(query.code.to_string()))?
         // Set the PKCE code verifier.
         .set_pkce_verifier(PkceCodeVerifier::new(
@@ -57,8 +57,7 @@ pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
     let id_token = token_response
         .id_token()
         .ok_or(HandlerError::IdTokenMissing)?;
-    let id_token_verifier = oidcclient
-        .client
+    let id_token_verifier = inner_client
         .id_token_verifier()
         .set_other_audience_verifier_fn(|audience|
             // Return false (reject) if audience is in list of untrusted audiences

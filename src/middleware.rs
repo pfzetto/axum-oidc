@@ -132,7 +132,8 @@ where
 
                 let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
                 let (auth_url, csrf_token, nonce) = {
-                    let mut auth = oidcclient.client.authorize_url(
+                    let inner_client = oidcclient.client.load();
+                    let mut auth = inner_client.authorize_url(
                         CoreAuthenticationFlow::AuthorizationCode,
                         CsrfToken::new_random,
                         Nonce::new_random,
@@ -251,13 +252,13 @@ where
                 .map_err(MiddlewareError::from)?;
 
             if let Some(login_session) = &mut login_session {
+                let inner_client = oidcclient.client.load();
                 let id_token_claims = login_session.authenticated.as_ref().and_then(|session| {
                     let nonce = login_session.nonce.clone();
                     session
                         .id_token
                         .claims(
-                            &oidcclient
-                                .client
+                            &inner_client
                                 .id_token_verifier()
                                 .set_other_audience_verifier_fn(|audience| {
                                     // Return false (reject) if audience is in list of untrusted audiences
@@ -377,8 +378,8 @@ pub(crate) async fn get_user_claims<AC: AdditionalClaims>(
     client: &OidcClient<AC>,
     access_token: AccessToken,
 ) -> Result<UserInfoClaims<AC, CoreGenderClaim>, MiddlewareError> {
-    client
-        .client
+    let inner_client = client.client.load();
+    inner_client
         .user_info(access_token, None)
         .map_err(MiddlewareError::Configuration)?
         .request_async(&client.http_client)
@@ -398,7 +399,8 @@ async fn try_refresh_token<AC: AdditionalClaims>(
     )>,
     MiddlewareError,
 > {
-    let mut refresh_request = client.client.exchange_refresh_token(refresh_token)?;
+    let inner_client = client.client.load();
+    let mut refresh_request = inner_client.exchange_refresh_token(refresh_token)?;
 
     for scope in client.scopes.iter() {
         refresh_request = refresh_request.add_scope(Scope::new(scope.to_string()));
@@ -410,8 +412,7 @@ async fn try_refresh_token<AC: AdditionalClaims>(
             let id_token = token_response
                 .id_token()
                 .ok_or(MiddlewareError::IdTokenMissing)?;
-            let id_token_verifier = client
-                .client
+            let id_token_verifier = inner_client
                 .id_token_verifier()
                 .set_other_audience_verifier_fn(|audience|
                     // Return false (reject) if audience is in list of untrusted audiences

@@ -12,6 +12,7 @@ keywords = ["axum", "oidc", "openidconnect", "authentication"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+arc-swap = "1.7"
 thiserror = "2.0"
 axum-core = "0.5"
 axum = { version = "0.8", default-features = false, features = [
