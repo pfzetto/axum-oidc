@@ -1,16 +1,17 @@
 use axum::{
     Router,
     error_handling::HandleErrorLayer,
-    http::Uri,
+    extract::FromRequestParts,
+    http::{Uri, request::Parts},
     response::IntoResponse,
     routing::{any, get},
 };
 use axum_oidc::{
-    EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer,
-    OidcRpInitiatedLogout,
+    AdditionalClaims, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcClient, OidcLoginLayer,
+    OidcRpInitiatedLogout, OidcSession,
     error::MiddlewareError,
     handle_oidc_redirect,
-    openidconnect::{Audience, ClientId, ClientSecret, IssuerUrl, Scope},
+    openidconnect::{Audience, ClientId, ClientSecret, IssuerUrl, Scope, core::CoreGenderClaim},
 };
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -19,6 +20,27 @@ use tower_sessions::{
     cookie::{SameSite, time::Duration},
 };
 use tracing::Level;
+
+struct SessionWrapper(tower_sessions::Session);
+impl<S: Send + Sync> FromRequestParts<S> for SessionWrapper {
+    type Rejection = <tower_sessions::Session as FromRequestParts<S>>::Rejection;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let session = tower_sessions::Session::from_request_parts(parts, state).await?;
+        Ok(Self(session))
+    }
+}
+
+impl<AC: AdditionalClaims> axum_oidc::Session<AC> for SessionWrapper {
+    type Error = tower_sessions::session::Error;
+    async fn get(&self) -> Result<OidcSession<AC, CoreGenderClaim>, Self::Error> {
+        Ok(self.0.get("axum-oidc").await?.unwrap_or_default())
+    }
+    async fn set(&mut self, value: OidcSession<AC, CoreGenderClaim>) -> Result<(), Self::Error> {
+        self.0.insert("axum-oidc", value).await?;
+        Ok(())
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -43,7 +65,7 @@ async fn main() {
             dbg!(&e);
             e.into_response()
         }))
-        .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new());
+        .layer(OidcLoginLayer::<EmptyAdditionalClaims, SessionWrapper>::new());
 
     let mut oidc_client = OidcClient::<EmptyAdditionalClaims>::builder()
         .with_default_http_client()
@@ -68,14 +90,17 @@ async fn main() {
             dbg!(&e);
             e.into_response()
         }))
-        .layer(OidcAuthLayer::new(oidc_client));
+        .layer(OidcAuthLayer::<_, SessionWrapper>::new(oidc_client));
 
     let app = Router::new()
         .route("/foo", get(authenticated))
         .route("/logout", get(logout))
         .layer(oidc_login_service)
         .route("/bar", get(maybe_authenticated))
-        .route("/oidc", any(handle_oidc_redirect::<EmptyAdditionalClaims>))
+        .route(
+            "/oidc",
+            any(handle_oidc_redirect::<EmptyAdditionalClaims, SessionWrapper>),
+        )
         .layer(oidc_auth_service)
         .layer(session_layer);
 

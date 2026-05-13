@@ -4,6 +4,7 @@ use http::{
     StatusCode,
 };
 use openidconnect::{core::CoreErrorResponseType, StandardErrorResponse};
+use std::error::Error as StdError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -68,7 +69,7 @@ pub enum MiddlewareError {
     ),
 
     #[error("session error: {0:?}")]
-    Session(#[from] tower_sessions::session::Error),
+    Session(Box<dyn StdError + Send>),
 
     #[error("session not found")]
     SessionNotFound,
@@ -85,8 +86,8 @@ pub enum MiddlewareError {
 
 #[derive(Debug, Error)]
 pub enum HandlerError {
-    #[error("redirect handler accessed without valid session, session cookie missing?")]
-    RedirectedWithoutSession,
+    #[error("redirect handler accessed without a pending session")]
+    RedirectWithInvalidSessionState,
 
     #[error("csrf token invalid")]
     CsrfTokenInvalid,
@@ -104,7 +105,7 @@ pub enum HandlerError {
     Signature(#[from] openidconnect::SignatureVerificationError),
 
     #[error("session error: {0:?}")]
-    Session(#[from] tower_sessions::session::Error),
+    Session(Box<dyn StdError + Send>),
 
     #[error("configuration: {0:?}")]
     Configuration(#[from] openidconnect::ConfigurationError),

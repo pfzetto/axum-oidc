@@ -3,6 +3,8 @@
 #![deny(warnings)]
 #![doc = include_str!("../README.md")]
 
+use std::error::Error as StdError;
+use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -35,7 +37,21 @@ pub use handler::handle_oidc_redirect;
 pub use middleware::{OidcAuthLayer, OidcAuthMiddleware, OidcLoginLayer, OidcLoginMiddleware};
 pub use openidconnect;
 
-const SESSION_KEY: &str = "axum-oidc";
+/// The session provider for this library.
+pub trait Session<AC: AdditionalClaims> {
+    type Error: StdError;
+
+    /// get the current session, returning `OidcSession::default` if no session exists
+    fn get(
+        &self,
+    ) -> impl Future<Output = Result<OidcSession<AC, CoreGenderClaim>, Self::Error>> + Send;
+
+    /// replace the current session
+    fn set(
+        &mut self,
+        value: OidcSession<AC, CoreGenderClaim>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
 
 pub trait AdditionalClaims:
     openidconnect::AdditionalClaims + Clone + Sync + Send + Serialize + DeserializeOwned
@@ -172,16 +188,37 @@ pub struct EmptyAdditionalClaims {}
 impl AdditionalClaims for EmptyAdditionalClaims {}
 impl openidconnect::AdditionalClaims for EmptyAdditionalClaims {}
 
-/// oidc session
+/// opaque session
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(bound = "AC: Serialize + DeserializeOwned")]
-struct OidcSession<AC: AdditionalClaims, GC: GenderClaim> {
+pub struct OidcSession<AC: AdditionalClaims, GC: GenderClaim>(OidcSessionInner<AC, GC>);
+impl<AC: AdditionalClaims, GC: GenderClaim> Default for OidcSession<AC, GC> {
+    fn default() -> Self {
+        Self(OidcSessionInner::Unauthenticated)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(bound = "AC: Serialize + DeserializeOwned")]
+enum OidcSessionInner<AC: AdditionalClaims, GC: GenderClaim> {
+    Unauthenticated,
+    Pending(PendingOidcSession),
+    Authenticated(AuthenticatedOidcSession<AC, GC>),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PendingOidcSession {
     nonce: Nonce,
     csrf_token: CsrfToken,
-    pkce_verifier: PkceCodeVerifier,
-    authenticated: Option<AuthenticatedSession<AC, GC>>,
-    refresh_token: Option<RefreshToken>,
     redirect_url: Box<str>,
+    pkce_verifier: PkceCodeVerifier,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(bound = "AC: Serialize + DeserializeOwned")]
+struct AuthenticatedOidcSession<AC: AdditionalClaims, GC: GenderClaim> {
+    authenticated: AuthenticatedSession<AC, GC>,
+    refresh_token: Option<RefreshToken>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

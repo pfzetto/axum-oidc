@@ -7,17 +7,16 @@ use axum::{
     extract::OriginalUri,
     response::{IntoResponse, Redirect},
 };
-use axum_core::response::Response;
+use axum_core::{extract::FromRequestParts, response::Response};
 use futures_util::future::BoxFuture;
 use http::{request::Parts, Request};
 use tower_layer::Layer;
 use tower_service::Service;
-use tower_sessions::Session;
 
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
     AccessToken, AccessTokenHash, CsrfToken, IdTokenClaims, IdTokenVerifier, Nonce,
-    NonceVerifier as _, OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
+    OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse, UserInfoClaims,
 };
@@ -26,58 +25,85 @@ use crate::{
     error::MiddlewareError,
     extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout, OidcUserInfo},
     AdditionalClaims, AuthenticatedSession, BoxError, ClearSessionFlag, IdToken, OidcClient,
-    OidcSession, SESSION_KEY,
+    OidcSession, OidcSessionInner, PendingOidcSession, Session,
 };
 
 /// Layer for the [`OidcLoginMiddleware`].
-#[derive(Clone, Default)]
-pub struct OidcLoginLayer<AC>
+#[derive(Default)]
+pub struct OidcLoginLayer<AC, S>
 where
     AC: AdditionalClaims,
+    S: Session<AC>,
 {
     additional: PhantomData<AC>,
+    session: PhantomData<S>,
 }
 
-impl<AC: AdditionalClaims> OidcLoginLayer<AC> {
+impl<AC: AdditionalClaims, S: Session<AC>> OidcLoginLayer<AC, S> {
     pub fn new() -> Self {
         Self {
             additional: PhantomData,
+            session: PhantomData,
         }
     }
 }
 
-impl<I, AC> Layer<I> for OidcLoginLayer<AC>
+impl<AC: AdditionalClaims, S: Session<AC>> Clone for OidcLoginLayer<AC, S> {
+    fn clone(&self) -> Self {
+        Self {
+            additional: PhantomData,
+            session: PhantomData,
+        }
+    }
+}
+
+impl<I, AC, S> Layer<I> for OidcLoginLayer<AC, S>
 where
     AC: AdditionalClaims,
+    S: Session<AC>,
 {
-    type Service = OidcLoginMiddleware<I, AC>;
+    type Service = OidcLoginMiddleware<I, AC, S>;
 
     fn layer(&self, inner: I) -> Self::Service {
         OidcLoginMiddleware {
             inner,
             additional: PhantomData,
+            session: PhantomData,
         }
     }
 }
 
 /// This middleware forces the user to be authenticated and redirects the user to the OpenID Connect
 /// Issuer to authenticate. This Middleware needs to be loaded afer [`OidcAuthMiddleware`].
-#[derive(Clone)]
-pub struct OidcLoginMiddleware<I, AC>
+pub struct OidcLoginMiddleware<I, AC, S>
 where
     AC: AdditionalClaims,
+    S: Session<AC>,
 {
     inner: I,
     additional: PhantomData<AC>,
+    session: PhantomData<S>,
 }
 
-impl<I, AC, B> Service<Request<B>> for OidcLoginMiddleware<I, AC>
+impl<I: Clone, AC: AdditionalClaims, S: Session<AC>> Clone for OidcLoginMiddleware<I, AC, S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            additional: PhantomData,
+            session: PhantomData,
+        }
+    }
+}
+
+impl<I, AC, B, S> Service<Request<B>> for OidcLoginMiddleware<I, AC, S>
 where
     I: Service<Request<B>, Response = Response> + Send + 'static + Clone,
     I::Error: Send + Into<BoxError>,
     I::Future: Send + 'static,
     AC: AdditionalClaims,
     B: Send + 'static,
+    S: Session<AC> + Send + FromRequestParts<()>,
+    S::Error: Send + 'static,
 {
     type Response = I::Response;
     type Error = MiddlewareError;
@@ -105,7 +131,7 @@ where
         } else {
             // no valid id token or refresh token was found and the user has to login
             Box::pin(async move {
-                let (parts, _) = request.into_parts();
+                let (mut parts, _) = request.into_parts();
 
                 let oidcclient: OidcClient<AC> = parts
                     .extensions
@@ -113,10 +139,9 @@ where
                     .cloned()
                     .ok_or(MiddlewareError::AuthMiddlewareNotFound)?;
 
-                let session = parts
-                    .extensions
-                    .get::<Session>()
-                    .ok_or(MiddlewareError::SessionNotFound)?;
+                let mut session = S::from_request_parts(&mut parts, &())
+                    .await
+                    .map_err(|_| MiddlewareError::SessionNotFound)?;
 
                 let redirect_url = parts
                     .extensions
@@ -150,16 +175,17 @@ where
                     auth.set_pkce_challenge(pkce_challenge).url()
                 };
 
-                let oidc_session = OidcSession::<AC, CoreGenderClaim> {
+                let oidc_session = OidcSession(OidcSessionInner::Pending(PendingOidcSession {
                     nonce,
                     csrf_token,
                     pkce_verifier,
-                    authenticated: None,
-                    refresh_token: None,
                     redirect_url: redirect_url.into(),
-                };
+                }));
 
-                session.insert(SESSION_KEY, oidc_session).await?;
+                session
+                    .set(oidc_session)
+                    .await
+                    .map_err(|x| MiddlewareError::Session(Box::new(x)))?;
 
                 Ok(Redirect::to(auth_url.as_str()).into_response())
             })
@@ -168,35 +194,50 @@ where
 }
 
 /// Layer for the [`OidcAuthMiddleware`].
-#[derive(Clone)]
-pub struct OidcAuthLayer<AC>
+pub struct OidcAuthLayer<AC, S>
 where
     AC: AdditionalClaims,
+    S: Session<AC>,
 {
     client: OidcClient<AC>,
+    session: PhantomData<S>,
 }
 
-impl<AC: AdditionalClaims> OidcAuthLayer<AC> {
-    pub fn new(client: OidcClient<AC>) -> Self {
-        Self { client }
+impl<AC: AdditionalClaims, S: Session<AC>> Clone for OidcAuthLayer<AC, S> {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            session: PhantomData,
+        }
     }
 }
-impl<AC: AdditionalClaims> From<OidcClient<AC>> for OidcAuthLayer<AC> {
+
+impl<AC: AdditionalClaims, S: Session<AC>> OidcAuthLayer<AC, S> {
+    pub fn new(client: OidcClient<AC>) -> Self {
+        Self {
+            client,
+            session: PhantomData,
+        }
+    }
+}
+impl<AC: AdditionalClaims, S: Session<AC>> From<OidcClient<AC>> for OidcAuthLayer<AC, S> {
     fn from(value: OidcClient<AC>) -> Self {
         Self::new(value)
     }
 }
 
-impl<I, AC> Layer<I> for OidcAuthLayer<AC>
+impl<I, AC, S> Layer<I> for OidcAuthLayer<AC, S>
 where
     AC: AdditionalClaims,
+    S: Session<AC>,
 {
-    type Service = OidcAuthMiddleware<I, AC>;
+    type Service = OidcAuthMiddleware<I, AC, S>;
 
     fn layer(&self, inner: I) -> Self::Service {
         OidcAuthMiddleware {
             inner,
             client: self.client.clone(),
+            session: PhantomData,
         }
     }
 }
@@ -205,16 +246,27 @@ where
 /// and the OidcClient in the request. This middleware needs to be loaded for every handler that is
 /// using on of the Extractors. This middleware **doesn't force a user to be
 /// authenticated**.
-#[derive(Clone)]
-pub struct OidcAuthMiddleware<I, AC>
+pub struct OidcAuthMiddleware<I, AC, S>
 where
     AC: AdditionalClaims,
+    S: Session<AC>,
 {
     inner: I,
     client: OidcClient<AC>,
+    session: PhantomData<S>,
 }
 
-impl<I, AC, B> Service<Request<B>> for OidcAuthMiddleware<I, AC>
+impl<I: Clone, AC: AdditionalClaims, S: Session<AC>> Clone for OidcAuthMiddleware<I, AC, S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            client: self.client.clone(),
+            session: PhantomData,
+        }
+    }
+}
+
+impl<I, AC, B, S> Service<Request<B>> for OidcAuthMiddleware<I, AC, S>
 where
     I: Service<Request<B>> + Send + 'static + Clone,
     I::Response: IntoResponse + Send,
@@ -222,6 +274,8 @@ where
     I::Future: Send + 'static,
     AC: AdditionalClaims,
     B: Send + 'static,
+    S: Session<AC> + Send + FromRequestParts<()>,
+    S::Error: Send + 'static,
 {
     type Response = Response;
     type Error = MiddlewareError;
@@ -241,21 +295,20 @@ where
         Box::pin(async move {
             let (mut parts, body) = request.into_parts();
 
-            let session = parts
-                .extensions
-                .get::<Session>()
-                .ok_or(MiddlewareError::SessionNotFound)?
-                .clone();
-            let mut login_session: Option<OidcSession<AC, CoreGenderClaim>> = session
-                .get(SESSION_KEY)
+            let mut session = S::from_request_parts(&mut parts, &())
                 .await
-                .map_err(MiddlewareError::from)?;
+                .map_err(|_| MiddlewareError::SessionNotFound)?;
 
-            if let Some(login_session) = &mut login_session {
+            let login_session: OidcSession<AC, CoreGenderClaim> = session
+                .get()
+                .await
+                .map_err(|x| MiddlewareError::Session(Box::new(x)))?;
+
+            if let OidcSession(OidcSessionInner::Authenticated(mut login_session)) = login_session {
                 let inner_client = oidcclient.client.load();
-                let id_token_claims = login_session.authenticated.as_ref().and_then(|session| {
-                    let nonce = login_session.nonce.clone();
-                    session
+                let id_token_claims = {
+                    login_session
+                        .authenticated
                         .id_token
                         .claims(
                             &inner_client
@@ -264,40 +317,43 @@ where
                                     // Return false (reject) if audience is in list of untrusted audiences
                                     !oidcclient.untrusted_audiences.contains(audience)
                                 }),
-                            // Accept tokens without a nonce (common after token refresh)
-                            |claims_nonce: Option<&Nonce>| match claims_nonce {
-                                Some(_) => nonce.verify(claims_nonce),
-                                None => Ok(()),
-                            },
+                            // nonce was verified when transitioning from `OidcSession::Pending` to `OidcSession::Authenticated`
+                            |_: Option<&Nonce>| Ok(()),
                         )
                         .ok()
                         .cloned()
-                        .map(|claims| (session, claims))
-                });
+                };
 
-                if let Some((session, claims)) = id_token_claims {
+                if let Some(claims) = id_token_claims {
                     // stored id token is valid and can be used
-                    insert_extensions(&mut parts, claims.clone(), &oidcclient, session);
+                    insert_extensions(
+                        &mut parts,
+                        claims.clone(),
+                        &oidcclient,
+                        &login_session.authenticated,
+                    );
                 } else if let Some(refresh_token) = login_session.refresh_token.as_ref() {
                     // session is expired but can be refreshed using the refresh_token
-                    if let Some((claims, authenticated_session, refresh_token)) =
-                        try_refresh_token(&oidcclient, refresh_token, &login_session.nonce).await?
-                    {
+                    let refresh_res = try_refresh_token(&oidcclient, refresh_token).await?;
+                    if let Some((claims, authenticated_session, refresh_token)) = refresh_res {
                         insert_extensions(&mut parts, claims, &oidcclient, &authenticated_session);
-                        login_session.authenticated = Some(authenticated_session);
+                        login_session.authenticated = authenticated_session;
 
                         if let Some(refresh_token) = refresh_token {
                             login_session.refresh_token = Some(refresh_token);
                         }
+
+                        // save refreshed session
+                        session
+                            .set(OidcSession(OidcSessionInner::Authenticated(login_session)))
+                            .await
+                            .map_err(|x| MiddlewareError::Session(Box::new(x)))?;
+                    } else {
+                        session
+                            .set(OidcSession(OidcSessionInner::Unauthenticated))
+                            .await
+                            .map_err(|x| MiddlewareError::Session(Box::new(x)))?;
                     };
-
-                    // save refreshed session or delete it when the token couldn't be refreshed
-                    let session = parts
-                        .extensions
-                        .get::<Session>()
-                        .ok_or(MiddlewareError::SessionNotFound)?;
-
-                    session.insert(SESSION_KEY, login_session).await?;
                 }
             }
 
@@ -311,10 +367,11 @@ where
                 .into_response();
 
             let has_logout_ext = response.extensions().get::<ClearSessionFlag>().is_some();
-            if let (true, Some(mut login_session)) = (has_logout_ext, login_session) {
-                login_session.authenticated = None;
-                login_session.refresh_token = None;
-                session.insert(SESSION_KEY, login_session).await?;
+            if let true = has_logout_ext {
+                session
+                    .set(OidcSession(OidcSessionInner::Unauthenticated))
+                    .await
+                    .map_err(|x| MiddlewareError::Session(Box::new(x)))?;
             }
 
             Ok(response)
@@ -379,18 +436,17 @@ pub(crate) async fn get_user_claims<AC: AdditionalClaims>(
     access_token: AccessToken,
 ) -> Result<UserInfoClaims<AC, CoreGenderClaim>, MiddlewareError> {
     let inner_client = client.client.load();
-    inner_client
+    let req = inner_client
         .user_info(access_token, None)
-        .map_err(MiddlewareError::Configuration)?
-        .request_async(&client.http_client)
+        .map_err(MiddlewareError::Configuration)?;
+    req.request_async::<AC, _, CoreGenderClaim>(&client.http_client)
         .await
-        .map_err(|e| e.into())
+        .map_err(|x| MiddlewareError::UserInfoRetrieval(x.into()))
 }
 
 async fn try_refresh_token<AC: AdditionalClaims>(
     client: &OidcClient<AC>,
     refresh_token: &RefreshToken,
-    nonce: &Nonce,
 ) -> Result<
     Option<(
         IdTokenClaims<AC, CoreGenderClaim>,
@@ -417,12 +473,8 @@ async fn try_refresh_token<AC: AdditionalClaims>(
                 .set_other_audience_verifier_fn(|audience|
                     // Return false (reject) if audience is in list of untrusted audiences
                     !client.untrusted_audiences.contains(audience));
-            let claims = id_token.claims(&id_token_verifier, |claims_nonce: Option<&Nonce>| {
-                match claims_nonce {
-                    Some(_) => nonce.verify(claims_nonce),
-                    None => Ok(()),
-                }
-            })?;
+            // nonce validation can be ignored as the token was fetched directly from the issuer.
+            let claims = id_token.claims(&id_token_verifier, |_: Option<&Nonce>| Ok(()))?;
 
             validate_access_token_hash(
                 id_token,

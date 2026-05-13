@@ -5,11 +5,10 @@ use openidconnect::{
     OAuth2TokenResponse, PkceCodeVerifier, TokenResponse,
 };
 use serde::Deserialize;
-use tower_sessions::Session;
 
 use crate::{
-    error::HandlerError, middleware::get_user_claims, AdditionalClaims, AuthenticatedSession,
-    IdToken, OidcClient, OidcSession, SESSION_KEY,
+    error::HandlerError, middleware::get_user_claims, AdditionalClaims, AuthenticatedOidcSession,
+    AuthenticatedSession, IdToken, OidcClient, OidcSession, OidcSessionInner, Session,
 };
 
 /// response data of the openid issuer after login
@@ -21,80 +20,95 @@ pub struct OidcQuery {
     session_state: Option<String>,
 }
 
-#[tracing::instrument(skip(oidcclient), err)]
-pub async fn handle_oidc_redirect<AC: AdditionalClaims>(
-    session: Session,
+#[tracing::instrument(skip(oidcclient, session), err)]
+pub async fn handle_oidc_redirect<AC, S>(
+    mut session: S,
     Extension(oidcclient): Extension<OidcClient<AC>>,
     Query(query): Query<OidcQuery>,
-) -> Result<impl axum::response::IntoResponse, HandlerError> {
+) -> Result<impl axum::response::IntoResponse, HandlerError>
+where
+    AC: AdditionalClaims,
+    S: Session<AC>,
+    S::Error: Send + 'static,
+{
     tracing::debug!("start handling oidc redirect");
 
-    let mut login_session: OidcSession<AC, CoreGenderClaim> = session
-        .get(SESSION_KEY)
-        .await?
-        .ok_or(HandlerError::RedirectedWithoutSession)?;
-    // the request has the request headers of the oidc redirect
-    // parse the headers and exchange the code for a valid token
+    let login_session: OidcSession<AC, CoreGenderClaim> = session
+        .get()
+        .await
+        .map_err(|x| HandlerError::Session(Box::new(x)))?;
 
-    tracing::debug!("validating scrf token");
-    if login_session.csrf_token.secret() != &query.state {
-        return Err(HandlerError::CsrfTokenInvalid);
-    }
+    if let OidcSession(OidcSessionInner::Pending(login_session)) = login_session {
+        // the request has the request headers of the oidc redirect
+        // parse the headers and exchange the code for a valid token
 
-    tracing::debug!("obtain token response");
-    let inner_client = oidcclient.client.load();
-    let token_response = inner_client
-        .exchange_code(AuthorizationCode::new(query.code.to_string()))?
-        // Set the PKCE code verifier.
-        .set_pkce_verifier(PkceCodeVerifier::new(
-            login_session.pkce_verifier.secret().to_string(),
-        ))
-        .request_async(&oidcclient.http_client)
-        .await?;
+        tracing::debug!("validating scrf token");
+        if login_session.csrf_token.secret() != &query.state {
+            return Err(HandlerError::CsrfTokenInvalid);
+        }
 
-    tracing::debug!("extract claims and verify it");
-    // Extract the ID token claims after verifying its authenticity and nonce.
-    let id_token = token_response
-        .id_token()
-        .ok_or(HandlerError::IdTokenMissing)?;
-    let id_token_verifier = inner_client
-        .id_token_verifier()
-        .set_other_audience_verifier_fn(|audience|
+        tracing::debug!("obtain token response");
+        let inner_client = oidcclient.client.load();
+        let token_response = inner_client
+            .exchange_code(AuthorizationCode::new(query.code.to_string()))?
+            // Set the PKCE code verifier.
+            .set_pkce_verifier(PkceCodeVerifier::new(
+                login_session.pkce_verifier.secret().to_string(),
+            ))
+            .request_async(&oidcclient.http_client)
+            .await?;
+
+        tracing::debug!("extract claims and verify it");
+        // Extract the ID token claims after verifying its authenticity and nonce.
+        let id_token = token_response
+            .id_token()
+            .ok_or(HandlerError::IdTokenMissing)?;
+        let id_token_verifier = inner_client
+            .id_token_verifier()
+            .set_other_audience_verifier_fn(|audience|
             // Return false (reject) if audience is in list of untrusted audiences
             !oidcclient.untrusted_audiences.contains(audience));
-    let claims = id_token.claims(&id_token_verifier, &login_session.nonce)?;
+        let claims = id_token.claims(&id_token_verifier, &login_session.nonce)?;
 
-    tracing::debug!("validate access token hash");
-    validate_access_token_hash(
-        id_token,
-        id_token_verifier,
-        token_response.access_token(),
-        claims,
-    )
-    .inspect_err(|e| tracing::error!(?e, "Access token hash invalid"))?;
+        tracing::debug!("validate access token hash");
+        validate_access_token_hash(
+            id_token,
+            id_token_verifier,
+            token_response.access_token(),
+            claims,
+        )
+        .inspect_err(|e| tracing::error!(?e, "Access token hash invalid"))?;
 
-    tracing::debug!("Access token hash validated");
+        tracing::debug!("Access token hash validated");
 
-    let user_info = get_user_claims(&oidcclient, token_response.access_token().clone()).await?;
+        let user_info = get_user_claims(&oidcclient, token_response.access_token().clone()).await?;
 
-    login_session.authenticated = Some(AuthenticatedSession {
-        id_token: id_token.clone(),
-        access_token: token_response.access_token().clone(),
-        user_info: user_info.into(),
-    });
-    let refresh_token = token_response.refresh_token().cloned();
-    if let Some(refresh_token) = refresh_token {
-        login_session.refresh_token = Some(refresh_token);
+        let authenticated = AuthenticatedSession {
+            id_token: id_token.clone(),
+            access_token: token_response.access_token().clone(),
+            user_info: user_info.into(),
+        };
+        let refresh_token = token_response.refresh_token().cloned();
+
+        tracing::debug!(
+            "Inserting session and redirecting to {}",
+            &login_session.redirect_url
+        );
+        let redirect_url = login_session.redirect_url.clone();
+        session
+            .set(OidcSession(OidcSessionInner::Authenticated(
+                AuthenticatedOidcSession {
+                    authenticated,
+                    refresh_token,
+                },
+            )))
+            .await
+            .map_err(|x| HandlerError::Session(Box::new(x)))?;
+
+        Ok(Redirect::to(&redirect_url))
+    } else {
+        Err(HandlerError::RedirectWithInvalidSessionState)
     }
-
-    tracing::debug!(
-        "Inserting session and redirecting to {}",
-        &login_session.redirect_url
-    );
-    let redirect_url = login_session.redirect_url.clone();
-    session.insert(SESSION_KEY, login_session).await?;
-
-    Ok(Redirect::to(&redirect_url))
 }
 
 /// Verify the access token hash to ensure that the access token hasn't been substituted for
