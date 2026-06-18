@@ -15,8 +15,8 @@ use tower_service::Service;
 
 use openidconnect::{
     core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
-    AccessToken, AccessTokenHash, CsrfToken, IdTokenClaims, IdTokenVerifier, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, RefreshToken,
+    AccessToken, AccessTokenHash, IdTokenClaims, IdTokenVerifier, Nonce, OAuth2TokenResponse,
+    PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse, UserInfoClaims,
 };
@@ -158,9 +158,10 @@ where
                 let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
                 let (auth_url, csrf_token, nonce) = {
                     let inner_client = oidcclient.client.load();
+                    let state_generator = oidcclient.state_generator.clone();
                     let mut auth = inner_client.authorize_url(
                         CoreAuthenticationFlow::AuthorizationCode,
-                        CsrfToken::new_random,
+                        move || state_generator(),
                         Nonce::new_random,
                     );
 
