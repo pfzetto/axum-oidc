@@ -206,7 +206,7 @@ impl<AC: AdditionalClaims, GC: GenderClaim> Default for OidcSession<AC, GC> {
 enum OidcSessionInner<AC: AdditionalClaims, GC: GenderClaim> {
     Unauthenticated,
     Pending(PendingOidcSession),
-    Authenticated(AuthenticatedOidcSession<AC, GC>),
+    Authenticated(Box<AuthenticatedOidcSession<AC, GC>>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

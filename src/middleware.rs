@@ -368,7 +368,7 @@ where
                 .into_response();
 
             let has_logout_ext = response.extensions().get::<ClearSessionFlag>().is_some();
-            if let true = has_logout_ext {
+            if has_logout_ext {
                 session
                     .set(OidcSession(OidcSessionInner::Unauthenticated))
                     .await
@@ -442,7 +442,7 @@ pub(crate) async fn get_user_claims<AC: AdditionalClaims>(
         .map_err(MiddlewareError::Configuration)?;
     req.request_async::<AC, _, CoreGenderClaim>(&client.http_client)
         .await
-        .map_err(|x| MiddlewareError::UserInfoRetrieval(x.into()))
+        .map_err(MiddlewareError::UserInfoRetrieval)
 }
 
 async fn try_refresh_token<AC: AdditionalClaims>(

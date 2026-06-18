@@ -96,12 +96,12 @@ where
         );
         let redirect_url = login_session.redirect_url.clone();
         session
-            .set(OidcSession(OidcSessionInner::Authenticated(
+            .set(OidcSession(OidcSessionInner::Authenticated(Box::new(
                 AuthenticatedOidcSession {
                     authenticated,
                     refresh_token,
                 },
-            )))
+            ))))
             .await
             .map_err(|x| HandlerError::Session(Box::new(x)))?;
 
