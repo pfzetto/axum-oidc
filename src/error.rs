@@ -7,6 +7,7 @@ use openidconnect::{core::CoreErrorResponseType, StandardErrorResponse};
 use std::error::Error as StdError;
 use thiserror::Error;
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ExtractorError {
     #[error("unauthorized")]
@@ -19,6 +20,7 @@ pub enum ExtractorError {
     FailedToCreateRpInitiatedLogoutUri,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum MiddlewareError {
     #[error("configuration: {0:?}")]
@@ -84,6 +86,7 @@ pub enum MiddlewareError {
     OriginalUrlNotFound,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum HandlerError {
     #[error("redirect handler accessed without a pending session")]
@@ -126,6 +129,7 @@ pub enum HandlerError {
     ClaimsRetrieval(#[from] MiddlewareError),
 }
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("url parsing: {0:?}")]
