@@ -2,7 +2,8 @@
 name = "axum-oidc"
 description = "A wrapper for the openidconnect crate for axum"
 version = "1.0.0-dev-2"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85.1"
 authors = ["Paul Z <info@pfzetto.de>"]
 readme = "README.md"
 repository = "https://codeberg.org/pfzetto/axum-oidc"
