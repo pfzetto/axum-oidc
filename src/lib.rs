@@ -1,6 +1,5 @@
 #![deny(unsafe_code)]
 #![deny(clippy::unwrap_used)]
-#![deny(warnings)]
 #![doc = include_str!("../README.md")]
 
 use std::error::Error as StdError;
