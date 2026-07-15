@@ -8,7 +8,6 @@ use openidconnect::{
 
 use crate::{error::Error, AdditionalClaims, Client, OidcClient, ProviderMetadata, StateGenerator};
 
-pub struct Unconfigured;
 pub struct OpenidconnectClient<AC: AdditionalClaims>(crate::Client<AC>);
 pub struct HttpClient(reqwest::Client);
 pub struct RedirectUrl(Uri);
