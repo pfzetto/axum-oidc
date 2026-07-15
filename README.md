@@ -30,6 +30,10 @@ I'm happy about any contribution in any form.
 Feel free to submit feature requests and bug reports using a GitHub Issue.
 PR's are also appreciated.
 
+# Communication
+Apart from the Codeberg [Issues](https://codeberg.org/pfzetto/axum-oidc/issues) and [Pull-Requests](https://codeberg.org/pfzetto/axum-oidc/pulls), there is a Matrix channel [`#axum-oidc:pfzetto.de`](https://matrix.to/#/#axum-oidc:pfzetto.de) for public discussion. 
+The maintainers can be contacted privately using the `axum-oidc@pfzetto.de` E-Mail address.
+
 # License
 This Library is licensed under [MPLv2](https://www.mozilla.org/en-US/MPL/2.0/).
 
