@@ -3,10 +3,10 @@ use std::{marker::PhantomData, sync::Arc};
 use arc_swap::ArcSwap;
 use http::Uri;
 use openidconnect::{
-    Audience, AuthenticationContextClass, ClientId, ClientSecret, IssuerUrl, Scope,
+    Audience, AuthenticationContextClass, ClientId, ClientSecret, CsrfToken, IssuerUrl, Scope,
 };
 
-use crate::{error::Error, AdditionalClaims, Client, OidcClient, ProviderMetadata};
+use crate::{error::Error, AdditionalClaims, Client, OidcClient, ProviderMetadata, StateGenerator};
 
 pub struct Unconfigured;
 pub struct OpenidconnectClient<AC: AdditionalClaims>(crate::Client<AC>);
@@ -27,6 +27,7 @@ pub struct Builder<AC: AdditionalClaims, Credentials, Client, HttpClient, Redire
     scopes: Vec<Scope>,
     auth_context_class: Option<AuthenticationContextClass>,
     untrusted_audiences: Vec<Audience>,
+    state_generator: StateGenerator,
     _ac: PhantomData<AC>,
 }
 
@@ -47,6 +48,7 @@ impl<AC: AdditionalClaims> Builder<AC, (), (), (), ()> {
             scopes: vec![],
             auth_context_class: None,
             untrusted_audiences: Vec::new(),
+            state_generator: Arc::new(CsrfToken::new_random),
             _ac: PhantomData,
         }
     }
@@ -89,6 +91,15 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, HTTP, RURL> Builder<AC, CREDS, CLIENT,
         self.untrusted_audiences = untrusted_audiences;
         self
     }
+
+    /// replace the generator for the oauth2 state parameter
+    pub fn with_state_generator(
+        mut self,
+        generator: impl Fn() -> CsrfToken + Send + Sync + 'static,
+    ) -> Self {
+        self.state_generator = Arc::new(generator);
+        self
+    }
 }
 
 impl<AC: AdditionalClaims, CLIENT, HTTP, RURL> Builder<AC, (), CLIENT, HTTP, RURL> {
@@ -109,6 +120,7 @@ impl<AC: AdditionalClaims, CLIENT, HTTP, RURL> Builder<AC, (), CLIENT, HTTP, RUR
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
             untrusted_audiences: self.untrusted_audiences,
+            state_generator: self.state_generator,
             _ac: PhantomData,
         }
     }
@@ -137,6 +149,7 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, RURL> Builder<AC, CREDS, CLIENT, (), R
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
             untrusted_audiences: self.untrusted_audiences,
+            state_generator: self.state_generator,
             _ac: self._ac,
         }
     }
@@ -151,6 +164,7 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, RURL> Builder<AC, CREDS, CLIENT, (), R
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
             untrusted_audiences: self.untrusted_audiences,
+            state_generator: self.state_generator,
             _ac: self._ac,
         }
     }
@@ -170,6 +184,7 @@ impl<AC: AdditionalClaims, CREDS, CLIENT, HCLIENT> Builder<AC, CREDS, CLIENT, HC
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
             untrusted_audiences: self.untrusted_audiences,
+            state_generator: self.state_generator,
             _ac: self._ac,
         }
     }
@@ -209,6 +224,7 @@ impl<AC: AdditionalClaims> Builder<AC, ClientCredentials, (), HttpClient, Redire
             scopes: self.scopes,
             auth_context_class: self.auth_context_class,
             untrusted_audiences: self.untrusted_audiences,
+            state_generator: self.state_generator,
             _ac: self._ac,
         })
     }
@@ -242,6 +258,7 @@ impl<AC: AdditionalClaims>
             end_session_endpoint: self.end_session_endpoint,
             auth_context_class: self.auth_context_class,
             untrusted_audiences: self.untrusted_audiences,
+            state_generator: self.state_generator,
         }
     }
 }

@@ -121,6 +121,8 @@ pub type ProviderMetadata = openidconnect::ProviderMetadata<
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+pub(crate) type StateGenerator = Arc<dyn Fn() -> CsrfToken + Send + Sync>;
+
 /// OpenID Connect Client
 ///
 /// The inner [`Client`] is held behind an [`ArcSwap`] so that its cached
@@ -141,6 +143,7 @@ pub struct OidcClient<AC: AdditionalClaims> {
     end_session_endpoint: Option<Uri>,
     auth_context_class: Option<AuthenticationContextClass>,
     untrusted_audiences: Vec<Audience>,
+    state_generator: StateGenerator,
 }
 
 impl<AC: AdditionalClaims> OidcClient<AC> {
@@ -203,7 +206,7 @@ impl<AC: AdditionalClaims, GC: GenderClaim> Default for OidcSession<AC, GC> {
 enum OidcSessionInner<AC: AdditionalClaims, GC: GenderClaim> {
     Unauthenticated,
     Pending(PendingOidcSession),
-    Authenticated(AuthenticatedOidcSession<AC, GC>),
+    Authenticated(Box<AuthenticatedOidcSession<AC, GC>>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
