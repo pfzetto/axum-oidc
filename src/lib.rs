@@ -125,7 +125,7 @@ pub(crate) type StateGenerator = Arc<dyn Fn() -> CsrfToken + Send + Sync>;
 
 /// OpenID Connect Client
 ///
-/// The inner [`Client`] is held behind an [`ArcSwap`] so that its cached
+/// The inner `Client` is held behind an [`ArcSwap`] so that its cached
 /// metadata — most importantly the JWKS used for ID token signature
 /// verification — can be replaced at runtime via
 /// [`OidcClient::rediscover`]. All clones of this `OidcClient` (including
