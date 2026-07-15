@@ -231,6 +231,7 @@ struct AuthenticatedSession<AC: AdditionalClaims, GC: GenderClaim> {
     user_info: UserInfoClaims<AC, GC>,
 }
 
+#[non_exhaustive]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "AC: Serialize + DeserializeOwned")]
 pub struct UserInfoClaims<AC: AdditionalClaims, GC: GenderClaim> {
