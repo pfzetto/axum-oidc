@@ -1,9 +1,9 @@
-use axum_core::{response::IntoResponse, BoxError};
+use axum_core::{BoxError, response::IntoResponse};
 use http::{
-    uri::{InvalidUri, InvalidUriParts},
     StatusCode,
+    uri::{InvalidUri, InvalidUriParts},
 };
-use openidconnect::{core::CoreErrorResponseType, StandardErrorResponse};
+use openidconnect::{StandardErrorResponse, core::CoreErrorResponseType};
 use std::error::Error as StdError;
 use thiserror::Error;
 

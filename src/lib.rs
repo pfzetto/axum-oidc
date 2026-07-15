@@ -9,6 +9,10 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use http::Uri;
 use openidconnect::{
+    AccessToken, Audience, AuthenticationContextClass, ClientId, ClientSecret, CsrfToken,
+    EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet, GenderClaim,
+    IdTokenFields, IssuerUrl, Nonce, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope,
+    StandardClaims, StandardErrorResponse, StandardTokenResponse,
     core::{
         CoreAuthDisplay, CoreAuthPrompt, CoreClaimName, CoreClaimType, CoreClientAuthMethod,
         CoreErrorResponseType, CoreGenderClaim, CoreGrantType, CoreJsonWebKey,
@@ -16,12 +20,8 @@ use openidconnect::{
         CoreResponseMode, CoreResponseType, CoreRevocableToken, CoreRevocationErrorResponse,
         CoreSubjectIdentifierType, CoreTokenIntrospectionResponse, CoreTokenType,
     },
-    AccessToken, Audience, AuthenticationContextClass, ClientId, ClientSecret, CsrfToken,
-    EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet, GenderClaim,
-    IdTokenFields, IssuerUrl, Nonce, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope,
-    StandardClaims, StandardErrorResponse, StandardTokenResponse,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::error::Error;
 

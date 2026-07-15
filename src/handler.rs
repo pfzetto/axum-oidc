@@ -1,14 +1,14 @@
-use axum::{extract::Query, response::Redirect, Extension};
+use axum::{Extension, extract::Query, response::Redirect};
 use openidconnect::{
-    core::{CoreGenderClaim, CoreJsonWebKey},
     AccessToken, AccessTokenHash, AuthorizationCode, IdTokenClaims, IdTokenVerifier,
     OAuth2TokenResponse, PkceCodeVerifier, TokenResponse,
+    core::{CoreGenderClaim, CoreJsonWebKey},
 };
 use serde::Deserialize;
 
 use crate::{
-    error::HandlerError, middleware::get_user_claims, AdditionalClaims, AuthenticatedOidcSession,
-    AuthenticatedSession, IdToken, OidcClient, OidcSession, OidcSessionInner, Session,
+    AdditionalClaims, AuthenticatedOidcSession, AuthenticatedSession, IdToken, OidcClient,
+    OidcSession, OidcSessionInner, Session, error::HandlerError, middleware::get_user_claims,
 };
 
 /// response data of the openid issuer after login

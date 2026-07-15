@@ -1,13 +1,13 @@
 use std::{borrow::Cow, convert::Infallible, ops::Deref};
 
-use crate::{error::ExtractorError, AdditionalClaims, ClearSessionFlag, UserInfoClaims};
+use crate::{AdditionalClaims, ClearSessionFlag, UserInfoClaims, error::ExtractorError};
 use axum::response::Redirect;
 use axum_core::{
     extract::{FromRequestParts, OptionalFromRequestParts},
     response::IntoResponse,
 };
-use http::{request::Parts, uri::PathAndQuery, Uri};
-use openidconnect::{core::CoreGenderClaim, ClientId, IdTokenClaims};
+use http::{Uri, request::Parts, uri::PathAndQuery};
+use openidconnect::{ClientId, IdTokenClaims, core::CoreGenderClaim};
 
 /// Extractor for the OpenID Connect Claims.
 ///

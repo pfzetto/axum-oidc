@@ -6,7 +6,7 @@ use openidconnect::{
     Audience, AuthenticationContextClass, ClientId, ClientSecret, CsrfToken, IssuerUrl, Scope,
 };
 
-use crate::{error::Error, AdditionalClaims, Client, OidcClient, ProviderMetadata, StateGenerator};
+use crate::{AdditionalClaims, Client, OidcClient, ProviderMetadata, StateGenerator, error::Error};
 
 pub struct OpenidconnectClient<AC: AdditionalClaims>(crate::Client<AC>);
 pub struct HttpClient(reqwest::Client);
