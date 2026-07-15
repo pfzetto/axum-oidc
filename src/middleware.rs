@@ -9,24 +9,53 @@ use axum::{
 };
 use axum_core::{extract::FromRequestParts, response::Response};
 use futures_util::future::BoxFuture;
-use http::{request::Parts, Request};
+use http::{Request, request::Parts};
 use tower_layer::Layer;
 use tower_service::Service;
 
 use openidconnect::{
-    core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
     AccessToken, AccessTokenHash, IdTokenClaims, IdTokenVerifier, Nonce, OAuth2TokenResponse,
     PkceCodeChallenge, RefreshToken,
     RequestTokenError::ServerResponse,
     Scope, TokenResponse, UserInfoClaims,
+    core::{CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey},
 };
 
 use crate::{
-    error::MiddlewareError,
-    extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout, OidcUserInfo},
     AdditionalClaims, AuthenticatedSession, BoxError, ClearSessionFlag, IdToken, OidcClient,
     OidcSession, OidcSessionInner, PendingOidcSession, Session,
+    error::MiddlewareError,
+    extractor::{OidcAccessToken, OidcClaims, OidcRpInitiatedLogout, OidcUserInfo},
 };
+
+/// Returns `true` if `path` is a safe, same-origin post-login redirect target.
+///
+/// `http::Uri` parses a protocol-relative target such as `//evil.com`
+/// (or the `/\evil.com` form browsers normalize to it) as a path with
+/// *no* authority.
+///
+/// But: a browser resolves a `Location: //evil.com` **off-origin**.
+/// To reject those, resolve the target against a fixed throwaway base
+/// and then ensure that it stays on that origin; anything protocol-relative or
+/// absolute resolves to a different host and is refused. This mirrors how a
+/// browser resolves a path-relative `Location` against the current origin, so
+/// the two agree on what counts as same-origin.
+fn is_safe_redirect_path(path: &str) -> bool {
+    const BASE: &str = "http://redirect.invalid/";
+    const HOST: &str = "redirect.invalid";
+
+    // Resolve the requested path against a fixed base, the same way a browser
+    // resolves a relative `Location` against the current origin.
+    // If parsing works, make sure the scheme stays http
+    if let Ok(resolved) = openidconnect::url::Url::parse(BASE).and_then(|base| base.join(path)) {
+        // A safe redirect path stays on the base's origin/host.
+        // Anything protocol-relative (`//host`), backslash (`/\host`), or absolute (`http://host`)
+        // resolves to a different scheme or host, and is therefore rejected.
+        resolved.scheme() == "http" && resolved.host_str() == Some(HOST)
+    } else {
+        false
+    }
+}
 
 /// Layer for the [`OidcLoginMiddleware`].
 #[derive(Default)]
@@ -143,18 +172,24 @@ where
                     .await
                     .map_err(|_| MiddlewareError::SessionNotFound)?;
 
-                let redirect_url = parts
+                let original_uri = parts
                     .extensions
                     .get::<OriginalUri>()
                     .ok_or(MiddlewareError::OriginalUrlNotFound)?;
 
-                let redirect_url = if let Some(query) = redirect_url.query() {
-                    redirect_url.path().to_string() + "?" + query
+                // The post-login redirect target is attacker-influenceable, so
+                // reject anything that is not a local same-origin path (e.g. the
+                // protocol-relative `//evil.com`) and fall back to the site root.
+                let redirect_url = if is_safe_redirect_path(original_uri.path()) {
+                    match original_uri.query() {
+                        Some(query) => original_uri.path().to_string() + "?" + query,
+                        None => original_uri.path().to_string(),
+                    }
                 } else {
-                    redirect_url.path().to_string()
+                    String::from("/")
                 };
-                // generate a login url and redirect the user to it
 
+                // generate a login url and redirect the user to it
                 let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
                 let (auth_url, csrf_token, nonce) = {
                     let inner_client = oidcclient.client.load();
@@ -511,5 +546,36 @@ async fn try_refresh_token<AC: AdditionalClaims>(
             Ok(None)
         }
         Err(err) => Err(err.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_redirect_path;
+
+    #[test]
+    fn accepts_local_paths() {
+        assert!(is_safe_redirect_path("/"));
+        assert!(is_safe_redirect_path("/dashboard"));
+        assert!(is_safe_redirect_path("/a/b/c"));
+        // percent-encoded slashes stay inside the path, they do not open a new
+        // authority
+        assert!(is_safe_redirect_path("/%2F%2Fevil.com"));
+        // dot-segments still resolve back to the same origin, exactly as a
+        // browser would resolve them against the current origin
+        assert!(is_safe_redirect_path("/..//evil.com"));
+    }
+
+    #[test]
+    fn rejects_off_origin_targets() {
+        // protocol-relative -> a browser resolves `Location: //evil.com` to
+        // https://evil.com
+        assert!(!is_safe_redirect_path("//evil.com"));
+        assert!(!is_safe_redirect_path("//evil.com/path"));
+        // the backslash form browsers normalize to `//evil.com`
+        assert!(!is_safe_redirect_path(r"/\evil.com"));
+        // fully-absolute urls
+        assert!(!is_safe_redirect_path("http://evil.com"));
+        assert!(!is_safe_redirect_path("https://evil.com/x"));
     }
 }
