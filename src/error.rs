@@ -157,10 +157,10 @@ impl IntoResponse for ExtractorError {
         match self {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
             Self::RpInitiatedLogoutNotSupported => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "intenal server error").into_response()
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
             }
             Self::FailedToCreateRpInitiatedLogoutUri => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "intenal server error").into_response()
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response()
             }
         }
     }

@@ -106,9 +106,9 @@ impl AsRef<str> for OidcAccessToken {
     }
 }
 
-/// Extractor for the [OpenID Connect RP-Initialized Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) URL
+/// Extractor for the [OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) URL
 ///
-/// This Extractor will only succed when the cached session is valid, [`crate::middleware::OidcAuthMiddleware`] is loaded and the issuer supports RP-Initialized Logout.
+/// This Extractor will only succeed when the cached session is valid, [`crate::middleware::OidcAuthMiddleware`] is loaded and the issuer supports RP-Initiated Logout.
 #[derive(Clone)]
 pub struct OidcRpInitiatedLogout {
     pub(crate) end_session_endpoint: Uri,

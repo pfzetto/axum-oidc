@@ -256,7 +256,7 @@ where
 }
 
 /// additional metadata that is discovered on client creation via the
-/// `.well-knwon/openid-configuration` endpoint.
+/// `.well-known/openid-configuration` endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdditionalProviderMetadata {
     end_session_endpoint: Option<String>,
