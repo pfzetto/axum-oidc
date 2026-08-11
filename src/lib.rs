@@ -201,6 +201,19 @@ impl<AC: AdditionalClaims, GC: GenderClaim> Default for OidcSession<AC, GC> {
     }
 }
 
+impl<AC: AdditionalClaims, GC: GenderClaim> OidcSession<AC, GC> {
+    /// Whether the session is authenticated.
+    pub fn is_authenticated(&self) -> bool {
+        matches!(self.0, OidcSessionInner::Authenticated(_))
+    }
+
+    /// Whether the session is authenticated and holds a refresh token. Without
+    /// one it cannot outlive its access token.
+    pub fn has_refresh_token(&self) -> bool {
+        matches!(&self.0, OidcSessionInner::Authenticated(session) if session.refresh_token.is_some())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(bound = "AC: Serialize + DeserializeOwned")]
 enum OidcSessionInner<AC: AdditionalClaims, GC: GenderClaim> {
