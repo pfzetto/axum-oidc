@@ -370,6 +370,11 @@ where
                     );
                 } else if let Some(refresh_token) = login_session.refresh_token.as_ref() {
                     // session is expired but can be refreshed using the refresh_token
+                    //
+                    // A refused refresh leaves the stored session untouched and
+                    // this request unauthenticated: under token rotation a
+                    // concurrent request may have just stored a valid new token,
+                    // and overwriting it would log that session out.
                     let refresh_res = try_refresh_token(&oidcclient, refresh_token).await?;
                     if let Some((claims, authenticated_session, refresh_token)) = refresh_res {
                         insert_extensions(&mut parts, claims, &oidcclient, &authenticated_session);
@@ -384,12 +389,7 @@ where
                             .set(OidcSession(OidcSessionInner::Authenticated(login_session)))
                             .await
                             .map_err(|x| MiddlewareError::Session(Box::new(x)))?;
-                    } else {
-                        session
-                            .set(OidcSession(OidcSessionInner::Unauthenticated))
-                            .await
-                            .map_err(|x| MiddlewareError::Session(Box::new(x)))?;
-                    };
+                    }
                 }
             }
 
@@ -535,23 +535,56 @@ async fn try_refresh_token<AC: AdditionalClaims>(
                 token_response.refresh_token().cloned(),
             )))
         }
-        Err(ServerResponse(e))
-            if *e.error() == CoreErrorResponseType::InvalidGrant
-                || e.error().as_ref() == "JwtToken" =>
-        {
-            // Refresh failed, refresh_token most likely expired or
-            // invalid, the session can be considered lost.
-            // Some providers (e.g. Keycloak) return "JwtToken" instead of
-            // "invalid_grant" for expired JWT-format refresh tokens.
-            Ok(None)
-        }
+        // The refresh token is expired, revoked, or was already spent by a
+        // concurrent request under token rotation: the session is lost.
+        Err(ServerResponse(e)) if is_refused_grant(e.error()) => Ok(None),
         Err(err) => Err(err.into()),
+    }
+}
+
+/// Whether a token endpoint error means the grant was refused, as opposed to
+/// the request or the client being at fault. Only a refused grant is
+/// recoverable by logging in again.
+fn is_refused_grant(error: &CoreErrorResponseType) -> bool {
+    match error {
+        CoreErrorResponseType::InvalidGrant => true,
+        // Providers disagree on the code for a refresh token they no longer
+        // accept: Keycloak answers `JwtToken`, Rauthy `NotFound`. Assume an
+        // off-spec code is one of those, except for the two RFC 6749 §4.1.2.1
+        // codes that blame the provider, so an outage does not unauthenticate
+        // every session. RFC 6749 §5.2 defines no such code for this endpoint
+        // and oauth2 discards the HTTP status, so the code is all we have.
+        CoreErrorResponseType::Extension(code) => {
+            !matches!(code.as_str(), "server_error" | "temporarily_unavailable")
+        }
+        CoreErrorResponseType::InvalidClient
+        | CoreErrorResponseType::InvalidRequest
+        | CoreErrorResponseType::InvalidScope
+        | CoreErrorResponseType::UnauthorizedClient
+        | CoreErrorResponseType::UnsupportedGrantType => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_safe_redirect_path;
+    use super::{CoreErrorResponseType, is_refused_grant, is_safe_redirect_path};
+
+    #[test]
+    fn separates_a_refused_grant_from_a_client_fault() {
+        // provider-specific codes for a refresh token that is gone
+        for code in ["JwtToken", "NotFound"] {
+            assert!(is_refused_grant(&CoreErrorResponseType::Extension(
+                code.to_owned()
+            )));
+        }
+        assert!(is_refused_grant(&CoreErrorResponseType::InvalidGrant));
+        assert!(!is_refused_grant(&CoreErrorResponseType::InvalidClient));
+        assert!(!is_refused_grant(&CoreErrorResponseType::InvalidRequest));
+        // a provider outage leaves the session alone
+        assert!(!is_refused_grant(&CoreErrorResponseType::Extension(
+            "server_error".to_owned()
+        )));
+    }
 
     #[test]
     fn accepts_local_paths() {
