@@ -52,6 +52,7 @@ pub trait Session<AC: AdditionalClaims> {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+/// AdditionalClaims can currently only be extracted from the ID Token, not the Access Token
 pub trait AdditionalClaims:
     openidconnect::AdditionalClaims + Clone + Sync + Send + Serialize + DeserializeOwned
 {

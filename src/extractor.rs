@@ -11,7 +11,7 @@ use openidconnect::{ClientId, IdTokenClaims, core::CoreGenderClaim};
 
 /// Extractor for the OpenID Connect Claims.
 ///
-/// This Extractor will only return the Claims when the cached session is valid and [`crate::middleware::OidcAuthMiddleware`] is loaded.
+/// This Extractor will only return the ID Token Claims when the cached session is valid and [`crate::middleware::OidcAuthMiddleware`] is loaded.
 #[derive(Clone, Debug)]
 pub struct OidcClaims<AC: AdditionalClaims>(pub IdTokenClaims<AC, CoreGenderClaim>);
 
