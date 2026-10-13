@@ -375,6 +375,11 @@ where
                     // this request unauthenticated: under token rotation a
                     // concurrent request may have just stored a valid new token,
                     // and overwriting it would log that session out.
+                    //
+                    // The drawback: a session whose refresh token is *really* gone
+                    // stays stored and is retried on every request until the
+                    // user logs in again (the login middleware replaces it),
+                    // logs out, or the session expires.
                     let refresh_res = try_refresh_token(&oidcclient, refresh_token).await?;
                     if let Some((claims, authenticated_session, refresh_token)) = refresh_res {
                         insert_extensions(&mut parts, claims, &oidcclient, &authenticated_session);

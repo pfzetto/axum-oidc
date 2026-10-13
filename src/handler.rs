@@ -90,7 +90,7 @@ where
         };
         let refresh_token = token_response.refresh_token().cloned();
         if refresh_token.is_none() {
-            tracing::warn!(
+            tracing::info!(
                 "Provider issued no refresh token; this session ends when its access token \
                  expires. Enable the refresh_token grant for this client, or request the \
                  `offline_access` scope if the provider requires it."

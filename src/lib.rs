@@ -202,7 +202,13 @@ impl<AC: AdditionalClaims, GC: GenderClaim> Default for OidcSession<AC, GC> {
 }
 
 impl<AC: AdditionalClaims, GC: GenderClaim> OidcSession<AC, GC> {
-    /// Whether the session is authenticated.
+    /// Whether the session holds tokens from a completed login.
+    ///
+    /// Returns `true` even if those tokens are expired and the provider has
+    /// refused to refresh them; the user then cannot act as authenticated
+    /// anymore, but the session keeps its tokens until the user logs in again,
+    /// logs out, or the session expires. To check whether the user is really
+    /// authenticated for a request, use the [`OidcClaims`] extractor.
     pub fn is_authenticated(&self) -> bool {
         matches!(self.0, OidcSessionInner::Authenticated(_))
     }
